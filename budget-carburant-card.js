@@ -14,7 +14,7 @@
  * Style repris de la carte Enedis Linky New (content-card-linky-new), du même auteur.
  */
 
-const CARD_VERSION = "1.0.0-beta.9";
+const CARD_VERSION = "1.0.0-beta.10";
 
 /* ------------------------------------------------------------- affichage */
 
@@ -450,8 +450,8 @@ class BudgetCarburantCard extends HTMLElement {
 }
 
 const PLEINS_STYLE = `<style>
-.pl-warn { font-style: normal; color: #ff5252; font-weight: 700; animation: pl-blink 1s steps(2, start) infinite; }
-@keyframes pl-blink { to { visibility: hidden; } }
+.pl-warn { font-style: normal; color: #ff5252; font-weight: 700; animation: pl-blink .9s ease-in-out infinite alternate; }
+@keyframes pl-blink { from { opacity: 1; } to { opacity: .25; } }
 @media (prefers-reduced-motion: reduce) { .pl-warn { animation: none; } }
 .pl-fold > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 8px; user-select: none; }
 .pl-fold > summary::-webkit-details-marker { display: none; }
