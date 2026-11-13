@@ -101,6 +101,7 @@ calendar: calendar.home
 | `title` | `Budget carburant` | titre de la carte |
 | `months` | `6` | mois dans le graphique des dépenses (3 à 12) |
 | `history` | `5` | derniers pleins affichés |
+| `folded` | `true` | « Par carburant », « Dépenses » et « Derniers pleins » repliés au départ (touchez le titre pour les ouvrir) |
 | `theme` | `v2` | `v2` bleu nuit, `auto` bleu nuit ou clair selon Home Assistant, `ha` thème Home Assistant |
 | `font_size` | `100` | taille du texte en % |
 | `install` | | réglages de l'installation (voitures, téléphone, prix), remplis par l'éditeur |
