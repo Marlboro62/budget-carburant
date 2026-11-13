@@ -46,6 +46,11 @@ une année de pleins sur deux voitures, un premier plein, une faute de kilométr
 en onglets ou une voiture, sections repliées ou ouvertes, en sombre ou clair, sur téléphone ou PC.
 La démo est aussi dans le dépôt : `docs/demo.html`, à ouvrir dans un navigateur.
 
+La page « Plein » qui s'ouvre au bip du tag, sur le téléphone : on touche le carburant (le prix du
+jour se remplit), on tape les litres et le kilométrage, puis « Enregistrer le plein ».
+
+<p align="center"><img src="images/page-plein.png" alt="Page Plein sur un téléphone" width="300"></p>
+
 ## Ce que contient le dépôt
 
 | Fichier | Rôle |
