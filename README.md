@@ -40,7 +40,8 @@ Sans fichier à copier ni redémarrage, avec un compte administrateur :
 2. Ajoutez la carte à un tableau de bord et ouvrez son éditeur. Sous les options de la carte, la
    partie **Installation du suivi des pleins** demande :
    - vos voitures : nom, tags NFC (par défaut « Plein &lt;nom&gt; »), compteur kilométrique facultatif ;
-   - le téléphone qui ouvre la page au bip ;
+   - le téléphone par défaut : la page s'ouvre sur le téléphone qui a bipé le tag, celui-ci sert
+     seulement si on ne sait pas lequel ;
    - les capteurs de prix du jour de votre station, pour chaque carburant (facultatif) ;
    - le paquet du lanceur Android pour revenir à l'accueil après l'enregistrement (facultatif).
    Si le suivi est déjà installé (à la main ou par une version précédente), **Reprendre l'installation en

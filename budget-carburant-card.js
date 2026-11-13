@@ -14,7 +14,7 @@
  * Style repris de la carte Enedis Linky New (content-card-linky-new), du même auteur.
  */
 
-const CARD_VERSION = "1.0.0-beta.4";
+const CARD_VERSION = "1.0.0-beta.5";
 
 /* ------------------------------------------------------------- affichage */
 
@@ -935,7 +935,9 @@ const INSTALL = {
     const notify = o.notify ? `notify.${o.notify}` : "";
     const names = Object.fromEntries(o.cars.map((c) => [c.id, c.name]));
     const odometers = Object.fromEntries(o.cars.map((c) => [c.id, c.odometer || ""]));
-    const note = (title, message, data) => (notify ? [{ action: notify, data: { title, message, data } }] : []);
+    // les messages vont au téléphone qui a bipé le tag, sinon au téléphone par défaut
+    const send = (data) => ({ if: [{ condition: "template", value_template: "{{ phone != '' }}" }], then: [{ action: "{{ phone }}", data }] });
+    const note = (title, message, data) => [send({ title, message, data })];
     const text = (entity, value) => ({ action: "input_text.set_value", target: { entity_id: entity }, data: { value } });
     const tpl = (v) => ({ condition: "template", value_template: v });
     const litresFr = "{{ ('%g' % litres) | replace('.', ',') }}";
@@ -950,7 +952,13 @@ const INSTALL = {
       triggers: o.cars.flatMap((c) => c.tags.map((t) => ({ trigger: "tag", tag_id: t, id: c.id }))),
       conditions: [],
       actions: [
-        { variables: { car: "{{ trigger.id }}" } },
+        {
+          variables: {
+            car: "{{ trigger.id }}",
+            phone_default: notify,
+            phone: `{% set d = (trigger.event.data.device_id | default('')) if trigger.event is defined else '' %}{% set n = device_attr(d, 'name') if d else '' %}{{ ('notify.mobile_app_' ~ (n | slugify)) if n else '${notify}' }}`,
+          },
+        },
         {
           variables: {
             car_name: `{{ ${JSON.stringify(names)}.get(car, car) }}`,
@@ -969,7 +977,7 @@ const INSTALL = {
         text(["input_text.plein_saisie_carburant", "input_text.plein_prix_au_litre", "input_text.plein_litres"], ""),
         text("input_text.plein_kilometrage", "{% set k = obd_km if obd_km > 0 else prev_km %}{{ (k | int) if k > 0 else '' }}"),
         text("input_text.plein_etape", "⛽ Plein {{ car_name }} : choisis le carburant, remplis, puis Enregistrer"),
-        ...(notify ? [{ action: notify, data: { message: "command_webview", data: { command: `/${PAGE_URL}/choix` } } }] : []),
+        send({ message: "command_webview", data: { command: `/${PAGE_URL}/choix` } }),
         ...note("Plein {{ car_name }}", "Remplis la page Plein puis touche Enregistrer (touche ici pour la rouvrir).", {
           tag: "{{ ctx }}", clickAction: `/${PAGE_URL}/choix`, sticky: "true", color: "#1d93e3", notification_icon: "mdi:gas-station",
         }),
@@ -1053,9 +1061,13 @@ const INSTALL = {
         ...note("Plein {{ car_name }} enregistré",
           `${litresFr} L de {{ fuel_icons.get(fuel, '⛽') }} {{ fuel }} à {{ ('%g' % price) | replace('.', ',') }} €/L, soit ${totalFr} €.{% if conso > 0 %} Consommation : ${consoFr} L/100 km sur {{ dist | int }} km.{% endif %}`,
           { tag: "{{ ctx }}", notification_icon: "mdi:gas-station" }),
+        // retour à l'accueil : seulement sur le téléphone par défaut, dont le lanceur est connu
         ...(notify && o.launcher ? [
           { delay: { seconds: 3 } },
-          { action: notify, data: { message: "command_activity", data: { intent_action: "android.intent.action.MAIN", intent_package_name: o.launcher } } },
+          {
+            if: [{ condition: "template", value_template: "{{ phone == phone_default }}" }],
+            then: [{ action: "{{ phone }}", data: { message: "command_activity", data: { intent_action: "android.intent.action.MAIN", intent_package_name: o.launcher } } }],
+          },
         ] : []),
       ],
     };
@@ -1133,8 +1145,8 @@ const INSTALL = {
       odometer: odos[id] ?? odos[" else"] ?? "",
     }));
     const steps = auto?.actions || auto?.action || [];
-    const notify = steps.map((a) => a.action || a.service || "").find((a) => a.startsWith("notify.mobile_app_"));
-    const launch = steps.find((a) => a.data?.message === "command_activity");
+    const notify = String(vars.phone_default || "") || steps.map((a) => a.action || a.service || "").find((a) => a.startsWith("notify.mobile_app_"));
+    const launch = steps.flatMap((a) => [a, ...(a.then || [])]).find((a) => a.data?.message === "command_activity");
     const out = { cars, notify: notify ? notify.slice(7) : "", launcher: launch?.data?.data?.intent_package_name || "" };
     const st = (script?.sequence || []).find((a) => a.variables?.stations)?.variables.stations || {};
     for (const f of FUELS) if (st[f]) out[`station_${f.toLowerCase()}`] = st[f];
@@ -1212,7 +1224,7 @@ const CAR_LABELS = {
   odometer: "Compteur kilométrique (facultatif : pré-remplit le kilométrage)",
 };
 const INSTALL_LABELS = {
-  notify: "Téléphone qui ouvre la page au bip",
+  notify: "Téléphone par défaut (la page s'ouvre sur le téléphone qui a bipé ; celui-ci sert si on ne sait pas lequel)",
   launcher: "Après l'enregistrement, revenir à l'accueil (Android, facultatif) : paquet du lanceur",
   ...Object.fromEntries(FUELS.map((f) => [`station_${f.toLowerCase()}`, `Prix du jour ${f} (facultatif)`])),
 };
