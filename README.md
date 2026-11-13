@@ -9,7 +9,12 @@ le plein ». Le plein est noté dans le calendrier, et la carte fait le reste.
 
 ![Carte Budget carburant](images/carte-demo.png)
 
-*Valeurs fictives.*
+*Aperçu réalisé avec la démo : voitures et pleins fictifs.*
+
+**[▶ Essayer la démo en ligne](https://marlboro62.github.io/budget-carburant/docs/demo.html)** :
+une année de pleins sur deux voitures, un premier plein, une faute de kilométrage ou aucun plein,
+en onglets ou une voiture, sections repliées ou ouvertes, en sombre ou clair, sur téléphone ou PC.
+La démo est aussi dans le dépôt : `docs/demo.html`, à ouvrir dans un navigateur.
 
 ## Ce que contient le dépôt
 
@@ -71,7 +76,7 @@ des cartes de Home Assistant.
 
 3. Copiez `packages/budget_carburant.yaml` dans `/config/packages/` et adaptez les lignes marquées
    **À ADAPTER** :
-   - les voitures (l'exemple en a deux, « Laguna » et « SLK ») : tags, noms et entrées par voiture ;
+   - les voitures (l'exemple en a deux, « Citadine » et « SUV ») : tags, noms et entrées par voiture ;
    - le calendrier (`calendar.home`) ;
    - le service de notification de votre téléphone (`notify.mobile_app_mon_telephone`) ;
    - les capteurs de prix du jour de votre station (intégration Prix des carburants, par exemple).
@@ -80,7 +85,7 @@ des cartes de Home Assistant.
    en tête du fichier). Ses pastilles viennent de
    [maison-chips-card](https://github.com/Marlboro62/maison-ha-cards).
 6. Écrivez un tag NFC par voiture avec l'application Home Assistant (**Paramètres › Tags › Ajouter
-   un tag**) en lui donnant l'identifiant du package (`Plein Laguna`, `Plein SLK`…), et collez-le
+   un tag**) en lui donnant l'identifiant du package (`Plein Citadine`, `Plein SUV`…), et collez-le
    dans la voiture.
 
 L'ouverture automatique de la page au bip utilise `command_webview` de l'application Android.
@@ -132,7 +137,7 @@ consommation hors de 3 à 30 L/100 km n'est pas comptée.
 La carte lit les événements dont le titre commence par « Plein » suivi du nom de la voiture :
 
 ```text
-Titre       : Plein Laguna
+Titre       : Plein Citadine
 Description : 42.5 L · E85 · 0.869 €/L · 36.93 € · 162000 km
 ```
 

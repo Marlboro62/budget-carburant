@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Budget carburant · démo</title>
+<meta name="description" content="Démonstration de la carte Lovelace Budget carburant avec des pleins simulés.">
+<style>
+  :root {
+    --bg: #0f1724; --panel: #172133; --line: #2a3850; --text: #e7edf5; --muted: #8fa0b8;
+    --accent: #ff9100; --accent2: #1d93e3; --btn: #1e2a3f; --btn-on: #2b3d5c;
+    /* Variables lues par la carte en mode « Thème Home Assistant » */
+    --card-background-color: #1c1c1c; --primary-text-color: #e1e1e1;
+    --secondary-text-color: #9b9b9b; --divider-color: rgba(225, 225, 225, .12);
+    --ha-card-border-radius: 12px;
+    color-scheme: dark;
+  }
+  :root[data-theme="light"] {
+    --bg: #eef2f7; --panel: #ffffff; --line: #d6dde8; --text: #1b2433; --muted: #5b6b82;
+    --accent: #e07b00; --accent2: #1673b8; --btn: #f2f5f9; --btn-on: #dde7f5;
+    --card-background-color: #ffffff; --primary-text-color: #212121;
+    --secondary-text-color: #727272; --divider-color: rgba(0, 0, 0, .12);
+    color-scheme: light;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  a { color: var(--accent2); }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 28px 16px 48px; }
+  .top { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 22px; }
+  .top svg { width: 40px; height: 40px; flex: none; }
+  h1 { font-size: 1.5rem; margin: 0; line-height: 1.2; }
+  .lead { margin: 2px 0 0; color: var(--muted); }
+  .links { margin-left: auto; display: flex; gap: 14px; font-size: .9rem; }
+  .grid { display: grid; grid-template-columns: 320px 1fr; gap: 20px; align-items: start; }
+  @media (max-width: 860px) { .grid { grid-template-columns: 1fr; } .links { margin-left: 0; } .stage { order: -1; } }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 16px; }
+  .panel h2 { font-size: .8rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 10px; }
+  .panel h2:not(:first-child) { margin-top: 18px; }
+  .ctl { margin-bottom: 14px; }
+  .ctl-l { font-size: .85rem; margin-bottom: 6px; }
+  .seg { display: flex; flex-wrap: wrap; gap: 6px; }
+  .seg button { font: inherit; font-size: .82rem; padding: 5px 11px; border-radius: 999px; cursor: pointer;
+    border: 1px solid var(--line); background: var(--btn); color: var(--text); }
+  .seg button[aria-pressed="true"] { background: var(--btn-on); border-color: var(--accent2); font-weight: 600; }
+  .seg button:focus-visible { outline: 2px solid var(--accent2); outline-offset: 2px; }
+  .note { font-size: .82rem; color: var(--muted); margin: 10px 0 0; }
+  .stage { min-width: 0; }
+  .frame { margin: 0 auto; width: 100%; transition: max-width .25s ease; }
+  .frame.phone { max-width: 400px; }
+  .frame.pc { max-width: 560px; }
+  budget-carburant-card { display: block; }
+  ha-card { display: block; }
+  pre { background: var(--btn); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px;
+    font-size: .8rem; overflow-x: auto; margin: 0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <svg viewBox="0 0 32 32" aria-hidden="true"><path fill="#ff9100" d="M7 5.5a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v22H7z"/><path fill="#ffd9a8" d="M10 7h7v6h-7z"/><path fill="#ff9100" d="M5.5 27h16v2.5h-16z"/><path fill="none" stroke="#ff9100" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M20 10.5l3.5 3v9.5a1.6 1.6 0 0 0 3.2 0V11l-3.5-3.5"/></svg>
+    <div>
+      <h1>Budget carburant</h1>
+      <p class="lead">Démo de la carte avec des pleins simulés (voitures et valeurs fictives).</p>
+    </div>
+    <nav class="links">
+      <a href="https://github.com/Marlboro62/budget-carburant">Dépôt GitHub</a>
+      <a href="https://github.com/Marlboro62/budget-carburant#installation-de-la-carte">Installer</a>
+    </nav>
+  </header>
+
+  <div class="grid">
+    <aside class="panel">
+      <h2>Pleins</h2>
+      <div class="ctl"><div class="seg" data-ctl="scenario">
+        <button data-v="year" aria-pressed="true">Une année, deux voitures</button>
+        <button data-v="first">Premier plein</button>
+        <button data-v="typo">Faute de kilométrage</button>
+        <button data-v="empty">Aucun plein</button>
+      </div></div>
+      <h2>Carte</h2>
+      <div class="ctl"><div class="ctl-l">Voiture</div><div class="seg" data-ctl="car">
+        <button data-v="" aria-pressed="true">Onglets</button>
+        <button data-v="Citadine">Citadine</button>
+        <button data-v="SUV">SUV</button>
+      </div></div>
+      <div class="ctl"><div class="ctl-l">Sections du bas</div><div class="seg" data-ctl="folded">
+        <button data-v="1" aria-pressed="true">Repliées</button>
+        <button data-v="0">Ouvertes</button>
+      </div></div>
+      <div class="ctl"><div class="ctl-l">Couleurs</div><div class="seg" data-ctl="theme">
+        <button data-v="v2" aria-pressed="true">Bleu nuit</button>
+        <button data-v="auto">Auto</button>
+        <button data-v="ha">Thème Home Assistant</button>
+      </div></div>
+      <div class="ctl"><div class="ctl-l">Home Assistant</div><div class="seg" data-ctl="mode">
+        <button data-v="dark" aria-pressed="true">Sombre</button>
+        <button data-v="light">Clair</button>
+      </div></div>
+      <div class="ctl"><div class="ctl-l">Écran</div><div class="seg" data-ctl="screen">
+        <button data-v="phone" aria-pressed="true">Téléphone</button>
+        <button data-v="pc">PC</button>
+      </div></div>
+      <h2>YAML de la carte</h2>
+      <pre id="yaml"></pre>
+      <p class="note">Touchez les titres « Par carburant », « Dépenses » et « Derniers pleins » pour les ouvrir.</p>
+    </aside>
+    <main class="stage"><div class="frame phone" id="frame"></div></main>
+  </div>
+</div>
+
+<script src="../budget-carburant-card.js"></script>
+<script>
+  // Pleins fictifs : « Plein <voiture> » avec la description qu'écrit l'automatisation du tag NFC
+  const DAY = 86400000;
+  const ev = (car, daysAgo, litres, fuel, price, km) => ({
+    summary: `Plein ${car}`,
+    description: `${litres} L · ${fuel} · ${price} €/L · ${(litres * price).toFixed(2)} € · ${km} km`,
+    start: { dateTime: new Date(Date.now() - daysAgo * DAY).toISOString() },
+  });
+  const PRICES = { SP98: 1.899, SP95: 1.789, E10: 1.749, E85: 0.869 };
+  const CONSO = { SP98: 6.4, SP95: 6.6, E10: 6.8, E85: 8.2 };
+  function year(car, startKm, fuels, every, perTank) {
+    const out = []; let km = startKm, prev = fuels[0];
+    for (let d = 3 + every * Math.floor(357 / every), i = 0; d >= 3; d -= every, i += 1) {
+      const fuel = fuels[i % fuels.length];
+      const litres = i ? Math.round(perTank * 10) / 10 : perTank;
+      if (i) km += Math.round(litres / CONSO[prev] * 100);
+      out.push(ev(car, d, litres, fuel, PRICES[fuel], km));
+      prev = fuel;
+    }
+    return out;
+  }
+  const SCENARIOS = {
+    year: () => [...year("Citadine", 84210, ["E85", "E85", "SP95", "E85", "SP98"], 17, 38), ...year("SUV", 131400, ["E10", "SP95", "E10"], 24, 52)],
+    first: () => [ev("Citadine", 0, 41, "E85", 0.869, 96520)],
+    typo: () => [ev("Citadine", 30, 40, "E85", 0.869, 96520), ev("Citadine", 15, 38, "SP95", 1.789, 9701), ev("Citadine", 1, 39, "E85", 0.869, 97480)],
+    empty: () => [],
+  };
+
+  const state = { scenario: "year", car: "", folded: "1", theme: "v2", mode: "dark", screen: "phone" };
+  const frame = document.getElementById("frame");
+  let card;
+
+  function render() {
+    document.documentElement.dataset.theme = state.mode;
+    frame.className = `frame ${state.screen}`;
+    const config = { calendar: "calendar.home", folded: state.folded === "1", theme: state.theme, ...(state.car ? { car: state.car } : {}) };
+    document.getElementById("yaml").textContent = ["type: custom:budget-carburant-card", ...Object.entries(config).map(([k, v]) => `${k}: ${v}`)].join("\n");
+    const events = SCENARIOS[state.scenario]();
+    card?.remove();
+    card = document.createElement("budget-carburant-card");
+    frame.appendChild(card);
+    card.setConfig(config);
+    card.hass = { themes: { darkMode: state.mode === "dark" }, states: {}, callApi: async () => events };
+  }
+
+  document.querySelectorAll(".seg").forEach((seg) => seg.addEventListener("click", (e) => {
+    const b = e.target.closest("button");
+    if (!b) return;
+    seg.querySelectorAll("button").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+    state[seg.dataset.ctl] = b.dataset.v;
+    render();
+  }));
+  render();
+</script>
+</body>
+</html>

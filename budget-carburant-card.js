@@ -14,7 +14,7 @@
  * Style repris de la carte Enedis Linky New (content-card-linky-new), du même auteur.
  */
 
-const CARD_VERSION = "1.0.0-beta.11";
+const CARD_VERSION = "1.0.0-beta.12";
 
 /* ------------------------------------------------------------- affichage */
 
@@ -195,8 +195,8 @@ const PLEINS = {
     return { car, date, litres, price, total: total ?? (price !== null ? litres * price : null), km, fuel };
   },
 
-  /** Préfixe et voiture tolérants : « Plein Laguna » tapé comme début de titre, ou « Plein SLK » comme voiture,
-   *  donnent préfixe « Plein » et voiture « Laguna » / « SLK ». */
+  /** Préfixe et voiture tolérants : « Plein Citadine » tapé comme début de titre, ou « Plein SUV » comme voiture,
+   *  donnent préfixe « Plein » et voiture « Citadine » / « SUV ». */
   target(config) {
     let prefix = String(config.prefix || PLEINS_DEFAULTS.prefix);
     let car = String(config.car || "").trim();
@@ -1174,7 +1174,7 @@ const INSTALL = {
       if ((t.trigger || t.platform) === "tag" && t.id && t.tag_id) (tags[t.id] ||= []).push(t.tag_id);
     }
     const vars = Object.assign({}, ...(auto?.actions || auto?.action || []).filter((a) => a.variables).map((a) => a.variables));
-    // « {{ {"laguna": "Laguna"}.get(car, car) }} » ou « {{ 'Laguna' if car == 'laguna' else 'SLK' }} »
+    // « {{ {"citadine": "Citadine"}.get(car, car) }} » ou « {{ 'Citadine' if car == 'citadine' else 'SUV' }} »
     const mapOf = (tpl) => {
       const s = String(tpl || "");
       const j = /\{\{\s*(\{.*\})\.get\(/.exec(s);
