@@ -14,7 +14,7 @@
  * Style repris de la carte Enedis Linky New (content-card-linky-new), du même auteur.
  */
 
-const CARD_VERSION = "1.0.0-beta.6";
+const CARD_VERSION = "1.0.0-beta.7";
 
 /* ------------------------------------------------------------- affichage */
 
@@ -194,6 +194,19 @@ const PLEINS = {
     return { car, date, litres, price, total: total ?? (price !== null ? litres * price : null), km, fuel };
   },
 
+  /** Préfixe et voiture tolérants : « Plein Laguna » tapé comme début de titre, ou « Plein SLK » comme voiture,
+   *  donnent préfixe « Plein » et voiture « Laguna » / « SLK ». */
+  target(config) {
+    let prefix = String(config.prefix || PLEINS_DEFAULTS.prefix);
+    let car = String(config.car || "").trim();
+    if (!/\s$/.test(prefix)) {
+      const m = /^(\S+)\s+(.+)$/.exec(prefix.trim());
+      if (m) { prefix = `${m[1]} `; if (!car) car = m[2].trim(); } else prefix = `${prefix.trim()} `;
+    }
+    if (car.toLowerCase().startsWith(prefix.toLowerCase())) car = car.slice(prefix.length).trim();
+    return { prefix, car };
+  },
+
   /** Statistiques d'une voiture. Consommation « plein à plein » : les litres du plein N ont été brûlés
    *  sur les km depuis le plein N-1, avec le carburant mis au plein N-1. */
   stats(fills, now) {
@@ -265,7 +278,7 @@ class BudgetCarburantCard extends HTMLElement {
 
   setConfig(config) {
     if (!config) throw new Error("Configuration de la carte manquante.");
-    this._config = { ...PLEINS_DEFAULTS, ...config, months: Number(config.months || PLEINS_DEFAULTS.months), history: Number(config.history || PLEINS_DEFAULTS.history) };
+    this._config = { ...PLEINS_DEFAULTS, ...config, months: Number(config.months || PLEINS_DEFAULTS.months), history: Number(config.history || PLEINS_DEFAULTS.history), ...PLEINS.target(config) };
     this._events = null;
     this._fetched = 0;
     this._car = this._config.car || null;
@@ -845,7 +858,7 @@ const SCHEMA = [
 const LABELS = {
   calendar: "Calendrier où chaque plein est noté",
   prefix: "Début du titre des événements (suivi du nom de la voiture)",
-  car: "Voiture affichée (vide : onglets pour toutes les voitures)",
+  car: "Voiture affichée",
   title: "Titre",
   months: "Mois dans le graphique des dépenses",
   history: "Derniers pleins affichés",
@@ -1239,7 +1252,15 @@ const INSTALL_LABELS = {
 class BudgetCarburantCardEditor extends makeEditor(SCHEMA, LABELS, PLEINS_DEFAULTS) {
   _draw() {
     super._draw();
-    if (this._hass && this._config) this._drawInstall();
+    if (!this._hass || !this._config) return;
+    // voiture affichée : liste des voitures de l'installation (ou un nom tapé) ; le début de titre reste en YAML
+    const names = (this._config.install?.cars || []).map((x) => String(x?.name || "").trim()).filter(Boolean);
+    const cur = String(this._config.car || "").trim();
+    if (cur && !names.includes(cur)) names.push(cur);
+    this._form.schema = SCHEMA.filter((s) => s.name !== "prefix").map((s) => (s.name === "car"
+      ? { name: "car", selector: { select: { mode: "dropdown", custom_value: true, options: [{ value: "", label: "Toutes (un onglet par voiture)" }, ...names.map((n) => ({ value: n, label: n }))] } } }
+      : s));
+    this._drawInstall();
   }
 
   _setInstall(install) {
