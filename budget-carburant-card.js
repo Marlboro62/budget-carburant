@@ -14,7 +14,7 @@
  * Style repris de la carte Enedis Linky New (content-card-linky-new), du même auteur.
  */
 
-const CARD_VERSION = "1.0.0-beta.3";
+const CARD_VERSION = "1.0.0-beta.4";
 
 /* ------------------------------------------------------------- affichage */
 
@@ -1147,7 +1147,9 @@ const INSTALL = {
     const o = INSTALL.normalize(config.install);
     if (!hass.user?.is_admin) throw new Error("il faut un compte administrateur de Home Assistant");
     if (!o.cars.length) throw new Error("ajoutez au moins une voiture");
-    if (!config.calendar) throw new Error("choisissez le calendrier de la carte");
+    // calendrier de la carte ; absent du YAML quand il est resté à sa valeur par défaut
+    const calendar = config.calendar || PLEINS_DEFAULTS.calendar;
+    if (!hass.states[calendar]) throw new Error(`le calendrier ${calendar} n'existe pas : choisissez-en un dans les options de la carte`);
     const ids = new Set(o.cars.map((c) => c.id));
     if (ids.size !== o.cars.length) throw new Error("deux voitures ont le même nom");
 
@@ -1169,7 +1171,7 @@ const INSTALL = {
 
     const current = Object.values(hass.states).find((s) => s.entity_id.startsWith("automation.") && s.attributes?.friendly_name === AUTOMATION_ALIAS);
     const autoId = current?.attributes?.id || "budget_carburant_plein_tag_nfc";
-    await hass.callApi("POST", `config/automation/config/${autoId}`, INSTALL.automation(o, config.calendar, autoId));
+    await hass.callApi("POST", `config/automation/config/${autoId}`, INSTALL.automation(o, calendar, autoId));
     log(`automatisation « ${AUTOMATION_ALIAS} » ${current ? "mise à jour" : "créée"} (${o.cars.reduce((n, c) => n + c.tags.length, 0)} tag(s))`);
 
     const boards = await hass.callWS({ type: "lovelace/dashboards/list" });
