@@ -14,7 +14,7 @@
  * Style repris de la carte Enedis Linky New (content-card-linky-new), du même auteur.
  */
 
-const CARD_VERSION = "1.0.0-beta.7";
+const CARD_VERSION = "1.0.0-beta.8";
 
 /* ------------------------------------------------------------- affichage */
 
@@ -172,6 +172,7 @@ const PLEINS_DEFAULTS = {
   car: "",
   months: 6,
   history: 5,
+  folded: true,
   theme: "v2",
   font_size: 100,
 };
@@ -290,6 +291,12 @@ class BudgetCarburantCard extends HTMLElement {
         this._car = t.dataset.car;
         this._render();
       });
+      // sections pliables : l'état ouvert / plié est gardé d'un rafraîchissement à l'autre
+      this._folds = {};
+      this.shadowRoot.addEventListener("toggle", (ev) => {
+        const d = ev.target;
+        if (d?.dataset?.fold) this._folds[d.dataset.fold] = d.open;
+      }, true);
     }
     this._render();
   }
@@ -353,8 +360,8 @@ class BudgetCarburantCard extends HTMLElement {
     }
     const s = PLEINS.stats(fills, new Date());
     this.shadowRoot.innerHTML = `${head}<ha-card class="${theme} gas"${hcHpStyle(c)}>
-      ${this._header(s)}${!c.car && cars.length > 1 ? this._tabs(cars) : ""}${this._hero(s)}${this._tiles(s)}${this._fuels(s)}${this._chart(s)}${this._history(s)}
-      <footer>${s.fills.some((x) => x.kmError) ? "⚠ kilométrage plus bas que le plein précédent : corriger l'événement dans le calendrier. " : ""}Consommation calculée de plein à plein : remplir le réservoir à chaque plein.</footer></ha-card>`;
+      ${this._header(s)}${!c.car && cars.length > 1 ? this._tabs(cars) : ""}${this._hero(s)}${this._tiles(s)}${this._fold("fuels", this._fuels(s), `${Object.keys(s.byFuel).filter((k) => k !== "?").length} carburant${Object.keys(s.byFuel).filter((k) => k !== "?").length > 1 ? "s" : ""}`)}${this._fold("chart", this._chart(s), `${euro(s.monthCost)} ce mois`)}${this._fold("history", this._history(s), `${s.fills.length} plein${s.fills.length > 1 ? "s" : ""}`)}
+      <footer>${s.fills.some((x) => x.kmError) ? "⚠ kilométrage qui n'augmente pas depuis le plein précédent : corriger l'événement dans le calendrier. " : ""}Consommation calculée de plein à plein : remplir le réservoir à chaque plein.</footer></ha-card>`;
   }
 
   _header(s) {
@@ -400,6 +407,15 @@ class BudgetCarburantCard extends HTMLElement {
     </section>`;
   }
 
+  /** Section pliable : son titre devient un bouton, avec un résumé à droite. */
+  _fold(key, html, info) {
+    if (!html) return "";
+    const open = this._folds?.[key] ?? !this._config.folded;
+    return html
+      .replace(/<div class="chart-h">(<span>[^<]*<\/span>)<\/div>/, (m, title) => `<details class="pl-fold" data-fold="${key}"${open ? " open" : ""}><summary class="chart-h">${title}<em>${esc(info)}</em><i class="pl-chev"></i></summary>`)
+      .replace(/<\/section>\s*$/, "</details></section>");
+  }
+
   _fuels(s) {
     const rows = Object.entries(s.byFuel).filter(([k]) => k !== "?").sort((a, b) => b[1].litres - a[1].litres);
     if (!rows.length) return "";
@@ -434,6 +450,13 @@ class BudgetCarburantCard extends HTMLElement {
 }
 
 const PLEINS_STYLE = `<style>
+.pl-fold > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 8px; user-select: none; }
+.pl-fold > summary::-webkit-details-marker { display: none; }
+.pl-fold > summary em { margin-left: auto; font-style: normal; font-size: .8rem; color: var(--med-muted); }
+.pl-chev { width: 8px; height: 8px; border-right: 2px solid var(--med-muted); border-bottom: 2px solid var(--med-muted);
+  transform: rotate(-45deg); transition: transform .2s; margin: 0 4px 2px 2px; flex: none; }
+.pl-fold[open] > summary .pl-chev { transform: rotate(45deg); }
+.pl-fold:not([open]) > summary { margin-bottom: 0; }
 .brand .hose { fill: none; stroke: var(--med-gas); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .pl-tabs { display: flex; gap: 8px; padding: 0 18px 8px; flex-wrap: wrap; }
 .pl-tabs button { all: unset; cursor: pointer; padding: 6px 14px; border-radius: 999px; border: 1px solid var(--med-line);
@@ -852,6 +875,7 @@ const SCHEMA = [
   { name: "title", selector: { text: {} } },
   { name: "months", selector: { number: { min: 3, max: 12, step: 1, mode: "box", unit_of_measurement: "mois" } } },
   { name: "history", selector: { number: { min: 1, max: 20, step: 1, mode: "box" } } },
+  { name: "folded", selector: { boolean: {} } },
   THEME_SELECT,
   { name: "font_size", selector: { number: { min: 70, max: 150, step: 5, mode: "slider", unit_of_measurement: "%" } } },
 ];
@@ -862,6 +886,7 @@ const LABELS = {
   title: "Titre",
   months: "Mois dans le graphique des dépenses",
   history: "Derniers pleins affichés",
+  folded: "Par carburant, dépenses et derniers pleins repliés au départ",
   theme: "Couleurs de la carte",
   font_size: "Taille du texte",
 };
