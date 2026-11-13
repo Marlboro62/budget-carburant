@@ -13,7 +13,7 @@
 #          packages: !include_dir_named packages
 #   2. copier ce fichier dans /config/packages/budget_carburant.yaml
 #   3. adapter les éléments marqués « À ADAPTER » :
-#        - les voitures (ici « Laguna » et « SLK ») : tags, identifiants et entrées par voiture
+#        - les voitures (ici « Citadine » et « SUV ») : tags, identifiants et entrées par voiture
 #        - calendar.home : votre calendrier (intégration « Calendrier local »)
 #        - notify.mobile_app_mon_telephone : le service de notification de votre téléphone
 #        - les capteurs de prix du jour de votre station (intégration Prix des carburants, par exemple)
@@ -51,59 +51,59 @@ input_text:
     pattern: "^[0-9 ]*$"
     icon: mdi:counter
   # dernier plein de chaque voiture (JSON) — À ADAPTER : une entrée par voiture
-  plein_laguna_dernier:
-    name: Plein Laguna dernier
+  plein_citadine_dernier:
+    name: Plein Citadine dernier
     max: 255
     icon: mdi:gas-station-outline
-  plein_slk_dernier:
-    name: Plein SLK dernier
+  plein_suv_dernier:
+    name: Plein SUV dernier
     max: 255
     icon: mdi:gas-station-outline
 
 # cumuls de chaque voiture — À ADAPTER : trois entrées par voiture
 input_number:
-  plein_laguna_depense_totale:
-    name: Plein Laguna dépense totale
+  plein_citadine_depense_totale:
+    name: Plein Citadine dépense totale
     min: 0
     max: 1000000
     step: 0.01
     mode: box
     unit_of_measurement: "€"
     icon: mdi:cash-multiple
-  plein_laguna_litres_cumules:
-    name: Plein Laguna litres cumulés
+  plein_citadine_litres_cumules:
+    name: Plein Citadine litres cumulés
     min: 0
     max: 1000000
     step: 0.01
     mode: box
     unit_of_measurement: L
     icon: mdi:water
-  plein_laguna_km_cumules:
-    name: Plein Laguna km cumulés
+  plein_citadine_km_cumules:
+    name: Plein Citadine km cumulés
     min: 0
     max: 10000000
     step: 1
     mode: box
     unit_of_measurement: km
     icon: mdi:map-marker-distance
-  plein_slk_depense_totale:
-    name: Plein SLK dépense totale
+  plein_suv_depense_totale:
+    name: Plein SUV dépense totale
     min: 0
     max: 1000000
     step: 0.01
     mode: box
     unit_of_measurement: "€"
     icon: mdi:cash-multiple
-  plein_slk_litres_cumules:
-    name: Plein SLK litres cumulés
+  plein_suv_litres_cumules:
+    name: Plein SUV litres cumulés
     min: 0
     max: 1000000
     step: 0.01
     mode: box
     unit_of_measurement: L
     icon: mdi:water
-  plein_slk_km_cumules:
-    name: Plein SLK km cumulés
+  plein_suv_km_cumules:
+    name: Plein SUV km cumulés
     min: 0
     max: 10000000
     step: 1
@@ -114,23 +114,23 @@ input_number:
 template:
   - sensor:
       # À ADAPTER : un capteur par voiture
-      - name: Plein Laguna consommation moyenne
-        unique_id: plein_laguna_consommation_moyenne
+      - name: Plein Citadine consommation moyenne
+        unique_id: plein_citadine_consommation_moyenne
         unit_of_measurement: L/100km
         state_class: measurement
         icon: mdi:gauge
         state: >
-          {% set l = states('input_number.plein_laguna_litres_cumules') | float(0) %}
-          {% set km = states('input_number.plein_laguna_km_cumules') | float(0) %}
+          {% set l = states('input_number.plein_citadine_litres_cumules') | float(0) %}
+          {% set km = states('input_number.plein_citadine_km_cumules') | float(0) %}
           {{ (l / km * 100) | round(2) if km > 0 else none }}
-      - name: Plein SLK consommation moyenne
-        unique_id: plein_slk_consommation_moyenne
+      - name: Plein SUV consommation moyenne
+        unique_id: plein_suv_consommation_moyenne
         unit_of_measurement: L/100km
         state_class: measurement
         icon: mdi:gauge
         state: >
-          {% set l = states('input_number.plein_slk_litres_cumules') | float(0) %}
-          {% set km = states('input_number.plein_slk_km_cumules') | float(0) %}
+          {% set l = states('input_number.plein_suv_litres_cumules') | float(0) %}
+          {% set km = states('input_number.plein_suv_km_cumules') | float(0) %}
           {{ (l / km * 100) | round(2) if km > 0 else none }}
 
 script:
@@ -195,20 +195,20 @@ automation:
       # À ADAPTER : un déclencheur par voiture ; l'id est le nom court utilisé dans les entrées
       # (plein_<id>_dernier, plein_<id>_depense_totale…)
       - trigger: tag
-        tag_id: Plein Laguna
-        id: laguna
+        tag_id: Plein Citadine
+        id: citadine
       - trigger: tag
-        tag_id: Plein SLK
-        id: slk
+        tag_id: Plein SUV
+        id: suv
     actions:
       - variables:
           car: "{{ trigger.id }}"
       - variables:
           # À ADAPTER : nom affiché de chaque voiture (titre des événements « Plein <nom> »)
-          car_name: "{{ {'laguna': 'Laguna', 'slk': 'SLK'}.get(car, car | upper) }}"
+          car_name: "{{ {'citadine': 'Citadine', 'suv': 'SUV'}.get(car, car | upper) }}"
           # Optionnel : capteur du compteur kilométrique (OBD, intégration constructeur) par voiture,
           # pour pré-remplir le kilométrage
-          odometer: "{{ {'laguna': '', 'slk': ''}.get(car, '') }}"
+          odometer: "{{ {'citadine': '', 'suv': ''}.get(car, '') }}"
           ctx: "{{ 'PLEIN_' ~ (car | upper) ~ '_' ~ (now().timestamp() | int) }}"
           fuel_icons:
             SP98: "🔴"
