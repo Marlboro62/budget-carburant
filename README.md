@@ -1,5 +1,7 @@
 # Budget carburant
 
+<p align="center"><img src="images/icone.png" alt="Icône Budget carburant" width="160"></p>
+
 Carte Lovelace pour Home Assistant qui suit les pleins de carburant de vos voitures : kilomètres,
 consommation moyenne et par carburant, litres, budget par plein, par jour, par mois et par année.
 
