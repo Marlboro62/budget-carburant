@@ -1,0 +1,389 @@
+# Budget carburant : pleins notés avec un tag NFC par voiture,
+# pour la carte custom:budget-carburant-card.
+#
+# Principe : au plein, on bipe le tag NFC de la voiture. Le téléphone ouvre la page « Plein »
+# (docs/page-plein.yaml) : on touche le carburant (le prix du jour se remplit), on tape les litres
+# et le kilométrage, puis « Enregistrer le plein ». L'automatisation vérifie la saisie, met à jour
+# les cumuls de la voiture et note le plein dans le calendrier (événement « Plein <voiture> »),
+# que la carte lit pour les kilomètres, la consommation, les litres et les budgets.
+#
+# Installation :
+#   1. configuration.yaml doit charger les packages :
+#        homeassistant:
+#          packages: !include_dir_named packages
+#   2. copier ce fichier dans /config/packages/budget_carburant.yaml
+#   3. adapter les éléments marqués « À ADAPTER » :
+#        - les voitures (ici « Laguna » et « SLK ») : tags, identifiants et entrées par voiture
+#        - calendar.home : votre calendrier (intégration « Calendrier local »)
+#        - notify.mobile_app_mon_telephone : le service de notification de votre téléphone
+#        - les capteurs de prix du jour de votre station (intégration Prix des carburants, par exemple)
+#   4. Outils › YAML › Vérifier la configuration, puis redémarrer
+#   5. créer la page « Plein » (docs/page-plein.yaml) et la carte :
+#        type: custom:budget-carburant-card
+#        calendar: calendar.home
+#
+# Consommation « plein à plein » : faire le plein complet à chaque fois. La consommation apparaît
+# à partir du deuxième plein.
+
+input_text:
+  # formulaire de la page « Plein » (texte : pas de 0 à effacer avant de taper)
+  plein_etape:
+    name: Plein étape
+    max: 255
+    icon: mdi:gas-station
+  plein_saisie_carburant:
+    name: Plein saisie carburant
+    max: 20
+    icon: mdi:gas-station
+  plein_prix_au_litre:
+    name: Plein prix au litre
+    max: 10
+    pattern: "^[0-9]*([.,][0-9]*)?$"
+    icon: mdi:cash
+  plein_litres:
+    name: Plein litres
+    max: 10
+    pattern: "^[0-9]*([.,][0-9]*)?$"
+    icon: mdi:water
+  plein_kilometrage:
+    name: Plein kilométrage
+    max: 10
+    pattern: "^[0-9 ]*$"
+    icon: mdi:counter
+  # dernier plein de chaque voiture (JSON) — À ADAPTER : une entrée par voiture
+  plein_laguna_dernier:
+    name: Plein Laguna dernier
+    max: 255
+    icon: mdi:gas-station-outline
+  plein_slk_dernier:
+    name: Plein SLK dernier
+    max: 255
+    icon: mdi:gas-station-outline
+
+# cumuls de chaque voiture — À ADAPTER : trois entrées par voiture
+input_number:
+  plein_laguna_depense_totale:
+    name: Plein Laguna dépense totale
+    min: 0
+    max: 1000000
+    step: 0.01
+    mode: box
+    unit_of_measurement: "€"
+    icon: mdi:cash-multiple
+  plein_laguna_litres_cumules:
+    name: Plein Laguna litres cumulés
+    min: 0
+    max: 1000000
+    step: 0.01
+    mode: box
+    unit_of_measurement: L
+    icon: mdi:water
+  plein_laguna_km_cumules:
+    name: Plein Laguna km cumulés
+    min: 0
+    max: 10000000
+    step: 1
+    mode: box
+    unit_of_measurement: km
+    icon: mdi:map-marker-distance
+  plein_slk_depense_totale:
+    name: Plein SLK dépense totale
+    min: 0
+    max: 1000000
+    step: 0.01
+    mode: box
+    unit_of_measurement: "€"
+    icon: mdi:cash-multiple
+  plein_slk_litres_cumules:
+    name: Plein SLK litres cumulés
+    min: 0
+    max: 1000000
+    step: 0.01
+    mode: box
+    unit_of_measurement: L
+    icon: mdi:water
+  plein_slk_km_cumules:
+    name: Plein SLK km cumulés
+    min: 0
+    max: 10000000
+    step: 1
+    mode: box
+    unit_of_measurement: km
+    icon: mdi:map-marker-distance
+
+template:
+  - sensor:
+      # À ADAPTER : un capteur par voiture
+      - name: Plein Laguna consommation moyenne
+        unique_id: plein_laguna_consommation_moyenne
+        unit_of_measurement: L/100km
+        state_class: measurement
+        icon: mdi:gauge
+        state: >
+          {% set l = states('input_number.plein_laguna_litres_cumules') | float(0) %}
+          {% set km = states('input_number.plein_laguna_km_cumules') | float(0) %}
+          {{ (l / km * 100) | round(2) if km > 0 else none }}
+      - name: Plein SLK consommation moyenne
+        unique_id: plein_slk_consommation_moyenne
+        unit_of_measurement: L/100km
+        state_class: measurement
+        icon: mdi:gauge
+        state: >
+          {% set l = states('input_number.plein_slk_litres_cumules') | float(0) %}
+          {% set km = states('input_number.plein_slk_km_cumules') | float(0) %}
+          {{ (l / km * 100) | round(2) if km > 0 else none }}
+
+script:
+  plein_choisir_carburant:
+    alias: Plein – choisir le carburant
+    description: >-
+      Appelé par les pastilles de la page « Plein » : note le carburant et pré-remplit
+      le prix du jour de la station.
+    icon: mdi:gas-station
+    mode: single
+    fields:
+      carburant:
+        name: Carburant
+        description: SP98, SP95, E10, E85, Gazole ou GPL
+        required: true
+        selector:
+          select:
+            options: [SP98, SP95, E10, E85, Gazole, GPL]
+    sequence:
+      - variables:
+          # À ADAPTER : capteurs de prix du jour de votre station (€/L) ; un carburant absent
+          # laisse le prix vide, à taper
+          stations:
+            SP98: sensor.station_sp98
+            SP95: sensor.station_sp95
+            E10: sensor.station_e10
+            E85: sensor.station_e85
+            Gazole: sensor.station_gazole
+      - variables:
+          prix: "{% set e = stations.get(carburant) %}{{ states(e) | float(0) if e else 0 }}"
+      - action: input_text.set_value
+        target:
+          entity_id: input_text.plein_saisie_carburant
+        data:
+          value: "{{ carburant }}"
+      - action: input_text.set_value
+        target:
+          entity_id: input_text.plein_prix_au_litre
+        data:
+          value: "{{ (('%g' % prix) | replace('.', ',')) if prix > 0 else '' }}"
+      - event: plein_carburant_choisi
+        event_data:
+          carburant: "{{ carburant }}"
+
+  plein_valider:
+    alias: Plein – enregistrer
+    description: Bouton « Enregistrer le plein » de la page « Plein ».
+    icon: mdi:content-save
+    mode: single
+    sequence:
+      - event: plein_valide
+
+automation:
+  - id: budget_carburant_plein_tag_nfc
+    alias: Plein de carburant (tag NFC)
+    description: >-
+      Bip du tag NFC d'une voiture au plein : ouvre la page Plein, attend le bouton Enregistrer,
+      vérifie et enregistre le plein (dernier plein, cumuls pour la consommation, calendrier).
+    mode: single
+    max_exceeded: silent
+    triggers:
+      # À ADAPTER : un déclencheur par voiture ; l'id est le nom court utilisé dans les entrées
+      # (plein_<id>_dernier, plein_<id>_depense_totale…)
+      - trigger: tag
+        tag_id: Plein Laguna
+        id: laguna
+      - trigger: tag
+        tag_id: Plein SLK
+        id: slk
+    actions:
+      - variables:
+          car: "{{ trigger.id }}"
+      - variables:
+          # À ADAPTER : nom affiché de chaque voiture (titre des événements « Plein <nom> »)
+          car_name: "{{ {'laguna': 'Laguna', 'slk': 'SLK'}.get(car, car | upper) }}"
+          # Optionnel : capteur du compteur kilométrique (OBD, intégration constructeur) par voiture,
+          # pour pré-remplir le kilométrage
+          odometer: "{{ {'laguna': '', 'slk': ''}.get(car, '') }}"
+          ctx: "{{ 'PLEIN_' ~ (car | upper) ~ '_' ~ (now().timestamp() | int) }}"
+          fuel_icons:
+            SP98: "🔴"
+            SP95: "🔵"
+            E10: "🟢"
+            E85: "🟠"
+            Gazole: "🟡"
+            GPL: "🟣"
+      - variables:
+          last: "{% set s = states('input_text.plein_' ~ car ~ '_dernier') %}{{ s | from_json if s.startswith('{') else {} }}"
+          obd_km: "{{ states(odometer) | float(0) | round(0) if odometer and is_number(states(odometer)) else 0 }}"
+      - variables:
+          prev_km: "{{ last.km | default(0) | float(0) }}"
+      # formulaire vide, kilométrage pré-rempli (compteur, sinon dernier plein)
+      - action: input_text.set_value
+        target:
+          entity_id:
+            - input_text.plein_saisie_carburant
+            - input_text.plein_prix_au_litre
+            - input_text.plein_litres
+        data:
+          value: ""
+      - action: input_text.set_value
+        target:
+          entity_id: input_text.plein_kilometrage
+        data:
+          value: "{% set k = obd_km if obd_km > 0 else prev_km %}{{ (k | int) if k > 0 else '' }}"
+      - action: input_text.set_value
+        target:
+          entity_id: input_text.plein_etape
+        data:
+          value: "⛽ Plein {{ car_name }} : choisis le carburant, remplis, puis Enregistrer"
+      # ouvre la page « Plein » dans l'application (Android), et une notification pour la rouvrir
+      # À ADAPTER : notify.mobile_app_mon_telephone
+      - action: notify.mobile_app_mon_telephone
+        data:
+          message: command_webview
+          data:
+            command: /plein-carburant/choix
+      - action: notify.mobile_app_mon_telephone
+        data:
+          title: Plein {{ car_name }}
+          message: Remplis la page Plein puis touche Enregistrer (touche ici pour la rouvrir).
+          data:
+            tag: "{{ ctx }}"
+            clickAction: /plein-carburant/choix
+            sticky: "true"
+            color: "#1d93e3"
+            notification_icon: mdi:gas-station
+      - variables:
+          essais: 0
+          ok: false
+          fuel: ""
+          price: 0
+          litres: 0
+          km: 0
+          err: ""
+      # attend « Enregistrer » (15 min), vérifie ; jusqu'à 5 essais
+      - repeat:
+          sequence:
+            - wait_for_trigger:
+                - trigger: event
+                  event_type: plein_valide
+              timeout: "00:15:00"
+              continue_on_timeout: true
+            - if:
+                - condition: template
+                  value_template: "{{ wait.trigger is none }}"
+              then:
+                - action: input_text.set_value
+                  target:
+                    entity_id: input_text.plein_etape
+                  data:
+                    value: "❌ Plein {{ car_name }} annulé : pas enregistré à temps"
+                - action: notify.mobile_app_mon_telephone
+                  data:
+                    title: Plein {{ car_name }}
+                    message: "Plein annulé : la page n'a pas été enregistrée."
+                    data:
+                      tag: "{{ ctx }}"
+                      notification_icon: mdi:gas-station
+                - stop: Pas d'enregistrement
+            - variables:
+                fuel: "{{ states('input_text.plein_saisie_carburant') }}"
+                price: "{{ states('input_text.plein_prix_au_litre') | replace(',', '.') | replace(' ', '') | float(0) }}"
+                litres: "{{ states('input_text.plein_litres') | replace(',', '.') | replace(' ', '') | float(0) }}"
+                km: "{{ states('input_text.plein_kilometrage') | replace(' ', '') | float(0) | round(0) }}"
+            - variables:
+                essais: "{{ essais + 1 }}"
+                err: >-
+                  {% if fuel not in fuel_icons %}choisis un carburant{% elif price <= 0 or price > 5 %}prix au litre incorrect ({{ price }} €){% elif litres <= 0 or litres > 150 %}litres incorrects ({{ litres }} L){% endif %}
+            - if:
+                - condition: template
+                  value_template: "{{ err == '' }}"
+              then:
+                - variables:
+                    ok: true
+              else:
+                - action: input_text.set_value
+                  target:
+                    entity_id: input_text.plein_etape
+                  data:
+                    value: "⚠️ {{ err | capitalize }} : corrige puis touche Enregistrer"
+          until:
+            - condition: template
+              value_template: "{{ ok or essais >= 5 }}"
+      - if:
+          - condition: template
+            value_template: "{{ not ok }}"
+        then:
+          - action: input_text.set_value
+            target:
+              entity_id: input_text.plein_etape
+            data:
+              value: "❌ Plein {{ car_name }} non enregistré : trop d'erreurs, rebipe le tag"
+          - stop: Saisie incorrecte
+      - variables:
+          total: "{{ (price * litres) | round(2) }}"
+          dist: "{{ (km - prev_km) | round(0) if km > 0 and prev_km > 0 and km > prev_km else 0 }}"
+      - variables:
+          conso: "{{ (litres / dist * 100) | round(2) if dist > 0 else 0 }}"
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.plein_{{ car }}_depense_totale
+        data:
+          value: "{{ (states('input_number.plein_' ~ car ~ '_depense_totale') | float(0) + total) | round(2) }}"
+      # plein à plein : les litres de ce plein correspondent aux km depuis le plein précédent
+      - if:
+          - condition: template
+            value_template: "{{ dist > 0 }}"
+        then:
+          - action: input_number.set_value
+            target:
+              entity_id: input_number.plein_{{ car }}_litres_cumules
+            data:
+              value: "{{ (states('input_number.plein_' ~ car ~ '_litres_cumules') | float(0) + litres) | round(2) }}"
+          - action: input_number.set_value
+            target:
+              entity_id: input_number.plein_{{ car }}_km_cumules
+            data:
+              value: "{{ (states('input_number.plein_' ~ car ~ '_km_cumules') | float(0) + dist) | round(0) }}"
+      - action: input_text.set_value
+        target:
+          entity_id: input_text.plein_{{ car }}_dernier
+        data:
+          value: "{{ {'d': now().isoformat(timespec='minutes'), 'f': fuel, 'l': litres, 'p': price, 't': total, 'km': (km if km > 0 else prev_km), 'c': conso} | to_json }}"
+      # l'événement que lit la carte — À ADAPTER : calendar.home
+      - action: calendar.create_event
+        target:
+          entity_id: calendar.home
+        data:
+          summary: Plein {{ car_name }}
+          description: "{{ litres }} L · {{ fuel }} · {{ price }} €/L · {{ total }} €{% if km > 0 %} · {{ km | int }} km{% endif %}{% if conso > 0 %} · {{ conso }} L/100 km{% endif %}"
+          start_date_time: "{{ now() }}"
+          end_date_time: "{{ now() + timedelta(minutes=1) }}"
+      - action: input_text.set_value
+        target:
+          entity_id: input_text.plein_etape
+        data:
+          value: "✔️ Plein {{ car_name }} enregistré : {{ ('%g' % litres) | replace('.', ',') }} L de {{ fuel_icons.get(fuel, '⛽') }} {{ fuel }}, {{ '%.2f' | format(total) | replace('.', ',') }} €{% if conso > 0 %} · {{ ('%g' % conso) | replace('.', ',') }} L/100 km{% endif %}"
+      - action: notify.mobile_app_mon_telephone
+        data:
+          title: Plein {{ car_name }} enregistré
+          message: "{{ ('%g' % litres) | replace('.', ',') }} L de {{ fuel_icons.get(fuel, '⛽') }} {{ fuel }} à {{ ('%g' % price) | replace('.', ',') }} €/L, soit {{ '%.2f' | format(total) | replace('.', ',') }} €.{% if conso > 0 %} Consommation : {{ ('%g' % conso) | replace('.', ',') }} L/100 km sur {{ dist | int }} km.{% endif %}"
+          data:
+            tag: "{{ ctx }}"
+            notification_icon: mdi:gas-station
+      # Optionnel (Android) : revenir à l'écran d'accueil du téléphone 3 s après l'enregistrement.
+      # Android ne permet pas de fermer l'application ; indiquer le paquet de votre lanceur
+      # (com.google.android.apps.nexuslauncher, com.sec.android.app.launcher…).
+      # - delay:
+      #     seconds: 3
+      # - action: notify.mobile_app_mon_telephone
+      #   data:
+      #     message: command_activity
+      #     data:
+      #       intent_action: android.intent.action.MAIN
+      #       intent_package_name: com.google.android.apps.nexuslauncher

@@ -1,0 +1,99 @@
+# Page « Plein » : le formulaire que le téléphone ouvre au bip du tag NFC.
+#
+# 1. Paramètres › Tableaux de bord › Ajouter un tableau de bord › « Nouveau tableau de bord à partir de zéro »,
+#    titre « Plein », adresse plein-carburant (sans l'afficher dans la barre latérale si vous voulez)
+# 2. dans ce tableau de bord : ⋮ › Modifier › ⋮ › Éditeur de configuration brute, coller ce fichier
+# 3. remplacer sensor.station_* par les capteurs de prix du jour de votre station (comme dans le script)
+#
+# Les pastilles viennent de maison-chips-card (dépôt Marlboro62/maison-ha-cards, Marketplace / HACS).
+# L'automatisation ouvre /plein-carburant/choix : garder l'adresse plein-carburant et le chemin choix.
+
+views:
+  - title: Plein
+    path: choix
+    icon: mdi:gas-station
+    max_columns: 1
+    cards:
+      - type: markdown
+        content: >-
+          {% set e = states('input_text.plein_etape') %}## {{ e if e not in ['', 'unknown', 'unavailable']
+          else '⛽ Choisis le carburant puis remplis le plein' }}
+      - type: custom:maison-titre-card
+        title: 1 · Carburant
+      - type: custom:maison-chips-card
+        align: center
+        chips:
+          - name: "SP98 · {state} €"
+            entity: sensor.station_sp98
+            icon: mdi:gas-station
+            color: "#FF5252"
+            tap_action: &carburant
+              action: perform-action
+              perform_action: script.plein_choisir_carburant
+              data:
+                carburant: SP98
+            hold_action: { action: none }
+          - name: "SP95 · {state} €"
+            entity: sensor.station_sp95
+            icon: mdi:gas-station
+            color: "#40C4FF"
+            tap_action: { <<: *carburant, data: { carburant: SP95 } }
+            hold_action: { action: none }
+          - name: "E10 · {state} €"
+            entity: sensor.station_e10
+            icon: mdi:gas-station
+            color: "#69F0AE"
+            tap_action: { <<: *carburant, data: { carburant: E10 } }
+            hold_action: { action: none }
+          - name: "E85 · {state} €"
+            entity: sensor.station_e85
+            icon: mdi:gas-station
+            color: "#FF9100"
+            tap_action: { <<: *carburant, data: { carburant: E85 } }
+            hold_action: { action: none }
+          - name: "Gazole · {state} €"
+            entity: sensor.station_gazole
+            icon: mdi:gas-station
+            color: "#FFD740"
+            tap_action: { <<: *carburant, data: { carburant: Gazole } }
+            hold_action: { action: none }
+          - name: GPL
+            icon: mdi:gas-station
+            color: "#B388FF"
+            tap_action: { <<: *carburant, data: { carburant: GPL } }
+            hold_action: { action: none }
+      - type: markdown
+        content: >-
+          {% set f = states('input_text.plein_saisie_carburant') %}{% set ic = {'SP98': '🔴', 'SP95': '🔵',
+          'E10': '🟢', 'E85': '🟠', 'Gazole': '🟡', 'GPL': '🟣'} %}### {{ ('Carburant choisi : ' ~ ic.get(f, '⛽')
+          ~ ' ' ~ f) if f not in ['', 'unknown', 'unavailable'] else 'Touche un carburant ci-dessus' }}
+      - type: custom:maison-titre-card
+        title: 2 · Plein
+      - type: entities
+        state_color: false
+        entities:
+          - entity: input_text.plein_prix_au_litre
+            name: Prix au litre (€)
+          - entity: input_text.plein_litres
+            name: Litres
+          - entity: input_text.plein_kilometrage
+            name: Kilométrage au compteur
+      - type: markdown
+        content: >-
+          {% set p = states('input_text.plein_prix_au_litre') | replace(',', '.') | float(0) %}{% set l =
+          states('input_text.plein_litres') | replace(',', '.') | float(0) %}{% if p > 0 and l > 0 %}### Total :
+          {{ '%.2f' | format(p * l) | replace('.', ',') }} €
+
+          {{ ('%g' % l) | replace('.', ',') }} L × {{ ('%g' % p) | replace('.', ',') }} €/L{% else %}### Total : —
+
+          Remplis le prix et les litres{% endif %}
+      - type: custom:maison-chips-card
+        align: center
+        chips:
+          - name: Enregistrer le plein
+            icon: mdi:content-save
+            active: true
+            tap_action:
+              action: perform-action
+              perform_action: script.plein_valider
+            hold_action: { action: none }
