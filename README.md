@@ -43,6 +43,8 @@ Sans fichier à copier ni redémarrage, avec un compte administrateur :
    - le téléphone qui ouvre la page au bip ;
    - les capteurs de prix du jour de votre station, pour chaque carburant (facultatif) ;
    - le paquet du lanceur Android pour revenir à l'accueil après l'enregistrement (facultatif).
+   Si le suivi est déjà installé (à la main ou par une version précédente), **Reprendre l'installation en
+   place** remplit ces réglages à partir de l'automatisation existante.
 3. Touchez **Installer ou mettre à jour**. La carte crée les entrées, les scripts, l'automatisation
    « Plein de carburant (tag NFC) » et la page « Plein » (`/plein-carburant/choix`), et affiche
    chaque étape.
