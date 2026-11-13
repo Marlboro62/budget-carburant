@@ -14,7 +14,7 @@
  * Style repris de la carte Enedis Linky New (content-card-linky-new), du même auteur.
  */
 
-const CARD_VERSION = "1.0.0-beta.8";
+const CARD_VERSION = "1.0.0-beta.9";
 
 /* ------------------------------------------------------------- affichage */
 
@@ -361,7 +361,7 @@ class BudgetCarburantCard extends HTMLElement {
     const s = PLEINS.stats(fills, new Date());
     this.shadowRoot.innerHTML = `${head}<ha-card class="${theme} gas"${hcHpStyle(c)}>
       ${this._header(s)}${!c.car && cars.length > 1 ? this._tabs(cars) : ""}${this._hero(s)}${this._tiles(s)}${this._fold("fuels", this._fuels(s), `${Object.keys(s.byFuel).filter((k) => k !== "?").length} carburant${Object.keys(s.byFuel).filter((k) => k !== "?").length > 1 ? "s" : ""}`)}${this._fold("chart", this._chart(s), `${euro(s.monthCost)} ce mois`)}${this._fold("history", this._history(s), `${s.fills.length} plein${s.fills.length > 1 ? "s" : ""}`)}
-      <footer>${s.fills.some((x) => x.kmError) ? "⚠ kilométrage qui n'augmente pas depuis le plein précédent : corriger l'événement dans le calendrier. " : ""}Consommation calculée de plein à plein : remplir le réservoir à chaque plein.</footer></ha-card>`;
+      <footer>${s.fills.some((x) => x.kmError) ? `<i class="pl-warn">⚠</i> kilométrage qui n'augmente pas depuis le plein précédent : corriger l'événement dans le calendrier. ` : ""}Consommation calculée de plein à plein : remplir le réservoir à chaque plein.</footer></ha-card>`;
   }
 
   _header(s) {
@@ -443,13 +443,16 @@ class BudgetCarburantCard extends HTMLElement {
 
   _history(s) {
     const rows = [...s.fills].reverse().slice(0, this._config.history).map((x) => `<div class="bill">
-      <span><i class="pl-dot" style="background:${FUEL_COLORS[x.fuel] || "var(--med-gas)"}"></i>${esc(x.date.toLocaleDateString("fr-FR", { day: "numeric", month: "short", year: "numeric" }).replace(".", ""))} · ${fmt(x.litres, x.litres % 1 ? 1 : 0)} L ${esc(x.fuel)}${x.km !== null ? ` · ${x.kmError ? "⚠ " : ""}${fmt(x.km, 0)} km` : ""}</span>
+      <span><i class="pl-dot" style="background:${FUEL_COLORS[x.fuel] || "var(--med-gas)"}"></i>${esc(x.date.toLocaleDateString("fr-FR", { day: "numeric", month: "short", year: "numeric" }).replace(".", ""))} · ${fmt(x.litres, x.litres % 1 ? 1 : 0)} L ${esc(x.fuel)}${x.km !== null ? ` · ${x.kmError ? `<i class="pl-warn" title="Kilométrage qui n'augmente pas depuis le plein précédent">⚠</i> ` : ""}${fmt(x.km, 0)} km` : ""}</span>
       <b>${x.total !== null ? euro(x.total) : "—"}</b></div>`).join("");
     return `<section class="bills"><div class="chart-h"><span>Derniers pleins</span></div>${rows}</section>`;
   }
 }
 
 const PLEINS_STYLE = `<style>
+.pl-warn { font-style: normal; color: #ff5252; font-weight: 700; animation: pl-blink 1s steps(2, start) infinite; }
+@keyframes pl-blink { to { visibility: hidden; } }
+@media (prefers-reduced-motion: reduce) { .pl-warn { animation: none; } }
 .pl-fold > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 8px; user-select: none; }
 .pl-fold > summary::-webkit-details-marker { display: none; }
 .pl-fold > summary em { margin-left: auto; font-style: normal; font-size: .8rem; color: var(--med-muted); }
