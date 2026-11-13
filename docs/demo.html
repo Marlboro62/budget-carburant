@@ -50,6 +50,9 @@
   .frame { margin: 0 auto; width: 100%; transition: max-width .25s ease; }
   .frame.phone { max-width: 400px; }
   .frame.pc { max-width: 560px; }
+  .shot { margin: 0 auto; max-width: 450px; }
+  .shot img { display: block; width: 100%; height: auto; border-radius: 22px; border: 1px solid var(--line); }
+  .shot figcaption { font-size: .85rem; color: var(--muted); margin-top: 10px; }
   budget-carburant-card { display: block; }
   ha-card { display: block; }
   pre { background: var(--btn); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px;
@@ -72,6 +75,11 @@
 
   <div class="grid">
     <aside class="panel">
+      <h2>Afficher</h2>
+      <div class="ctl"><div class="seg" data-ctl="view">
+        <button data-v="card" aria-pressed="true">La carte</button>
+        <button data-v="page">La page Plein (téléphone)</button>
+      </div></div>
       <h2>Pleins</h2>
       <div class="ctl"><div class="seg" data-ctl="scenario">
         <button data-v="year" aria-pressed="true">Une année, deux voitures</button>
@@ -106,7 +114,13 @@
       <pre id="yaml"></pre>
       <p class="note">Touchez les titres « Par carburant », « Dépenses » et « Derniers pleins » pour les ouvrir.</p>
     </aside>
-    <main class="stage"><div class="frame phone" id="frame"></div></main>
+    <main class="stage"><div class="frame phone" id="frame"></div>
+      <figure class="shot" id="shot" hidden>
+        <img src="../images/page-plein.png" alt="Page Plein sur un téléphone : pastilles des carburants avec le prix du jour, prix au litre, litres, kilométrage, total et bouton Enregistrer le plein" width="450">
+        <figcaption>La page « Plein » qui s'ouvre au bip du tag NFC, sur le téléphone qui a bipé. Le prix du jour se remplit
+          en touchant le carburant ; « Enregistrer le plein » note le plein dans le calendrier, et la carte se met à jour.
+          <br><em>Capture réelle d'un téléphone Android, nom de voiture modifié.</em></figcaption>
+      </figure></main>
   </div>
 </div>
 
@@ -139,13 +153,15 @@
     empty: () => [],
   };
 
-  const state = { scenario: "year", car: "", folded: "1", theme: "v2", mode: "dark", screen: "phone" };
+  const state = { view: "card", scenario: "year", car: "", folded: "1", theme: "v2", mode: "dark", screen: "phone" };
   const frame = document.getElementById("frame");
   let card;
 
   function render() {
     document.documentElement.dataset.theme = state.mode;
     frame.className = `frame ${state.screen}`;
+    frame.hidden = state.view !== "card";
+    document.getElementById("shot").hidden = state.view !== "page";
     const config = { calendar: "calendar.home", folded: state.folded === "1", theme: state.theme, ...(state.car ? { car: state.car } : {}) };
     document.getElementById("yaml").textContent = ["type: custom:budget-carburant-card", ...Object.entries(config).map(([k, v]) => `${k}: ${v}`)].join("\n");
     const events = SCENARIOS[state.scenario]();
