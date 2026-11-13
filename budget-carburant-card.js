@@ -14,7 +14,7 @@
  * Style repris de la carte Enedis Linky New (content-card-linky-new), du même auteur.
  */
 
-const CARD_VERSION = "1.0.0-beta.1";
+const CARD_VERSION = "1.0.0-beta.2";
 
 /* ------------------------------------------------------------- affichage */
 
@@ -846,7 +846,452 @@ const LABELS = {
   theme: "Couleurs de la carte",
   font_size: "Taille du texte",
 };
-const BudgetCarburantCardEditor = makeEditor(SCHEMA, LABELS, PLEINS_DEFAULTS);
+/* ------------------------------------------------------------ installation */
+
+/** Installation du suivi des pleins depuis l'éditeur de la carte : entrées, scripts, automatisation du tag NFC
+ *  et page « Plein », créés par l'API de Home Assistant comme le ferait l'interface (compte administrateur). */
+const FUELS = ["SP98", "SP95", "E10", "E85", "Gazole", "GPL"];
+const FUEL_ICONS = { SP98: "🔴", SP95: "🔵", E10: "🟢", E85: "🟠", Gazole: "🟡", GPL: "🟣" };
+const AUTOMATION_ALIAS = "Plein de carburant (tag NFC)";
+const PAGE_URL = "plein-carburant";
+
+const INSTALL = {
+  /** Identifiant d'une voiture, comme Home Assistant le tire du nom d'une entrée (« Clio 4 » → clio_4). */
+  slug(name) {
+    return String(name || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase()
+      .replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+  },
+
+  /** Réglages de l'éditeur nettoyés : voitures nommées, tags (par défaut « Plein <nom> »). */
+  normalize(install) {
+    const i = install || {};
+    const cars = (Array.isArray(i.cars) ? i.cars : [])
+      .map((c) => ({
+        name: String(c?.name || "").trim(),
+        tags: String(c?.tags || "").split(",").map((t) => t.trim()).filter(Boolean),
+        odometer: c?.odometer || "",
+      }))
+      .filter((c) => c.name && INSTALL.slug(c.name))
+      .map((c) => ({ ...c, id: INSTALL.slug(c.name), tags: c.tags.length ? c.tags : [`Plein ${c.name}`] }));
+    const stations = {};
+    for (const f of FUELS) if (i[`station_${f.toLowerCase()}`]) stations[f] = i[`station_${f.toLowerCase()}`];
+    return { cars, notify: i.notify || "", launcher: String(i.launcher || "").trim(), stations };
+  },
+
+  /** Entrées à créer : [domaine, nom, réglages]. L'identifiant vient du nom (« Plein étape » → plein_etape). */
+  helpers(cars) {
+    const num = (unit, icon, max, step) => ({ min: 0, max, step, mode: "box", unit_of_measurement: unit, icon });
+    const list = [
+      ["input_text", "Plein étape", { max: 255, icon: "mdi:gas-station" }],
+      ["input_text", "Plein saisie carburant", { max: 20, icon: "mdi:gas-station" }],
+      ["input_text", "Plein prix au litre", { max: 10, pattern: "^[0-9]*([.,][0-9]*)?$", icon: "mdi:cash" }],
+      ["input_text", "Plein litres", { max: 10, pattern: "^[0-9]*([.,][0-9]*)?$", icon: "mdi:water" }],
+      ["input_text", "Plein kilométrage", { max: 10, pattern: "^[0-9 ]*$", icon: "mdi:counter" }],
+    ];
+    for (const c of cars) {
+      list.push(["input_text", `Plein ${c.name} dernier`, { max: 255, icon: "mdi:gas-station-outline" }]);
+      list.push(["input_number", `Plein ${c.name} dépense totale`, num("€", "mdi:cash-multiple", 1000000, 0.01)]);
+      list.push(["input_number", `Plein ${c.name} litres cumulés`, num("L", "mdi:water", 1000000, 0.01)]);
+      list.push(["input_number", `Plein ${c.name} km cumulés`, num("km", "mdi:map-marker-distance", 10000000, 1)]);
+    }
+    return list.map(([domain, name, opts]) => ({ domain, name, id: INSTALL.slug(name), opts }));
+  },
+
+  scripts(o) {
+    return {
+      plein_choisir_carburant: {
+        alias: "Plein – choisir le carburant",
+        description: "Appelé par les pastilles de la page « Plein » : note le carburant et pré-remplit le prix du jour de la station.",
+        icon: "mdi:gas-station",
+        mode: "single",
+        fields: {
+          carburant: {
+            name: "Carburant", description: FUELS.join(", "), required: true,
+            selector: { select: { options: FUELS } },
+          },
+        },
+        sequence: [
+          { variables: { stations: o.stations } },
+          { variables: { prix: "{% set e = stations.get(carburant) %}{{ states(e) | float(0) if e else 0 }}" } },
+          { action: "input_text.set_value", target: { entity_id: "input_text.plein_saisie_carburant" }, data: { value: "{{ carburant }}" } },
+          {
+            action: "input_text.set_value", target: { entity_id: "input_text.plein_prix_au_litre" },
+            data: { value: "{{ (('%g' % prix) | replace('.', ',')) if prix > 0 else '' }}" },
+          },
+          { event: "plein_carburant_choisi", event_data: { carburant: "{{ carburant }}" } },
+        ],
+      },
+      plein_valider: {
+        alias: "Plein – enregistrer",
+        description: "Bouton « Enregistrer le plein » de la page « Plein ».",
+        icon: "mdi:content-save",
+        mode: "single",
+        sequence: [{ event: "plein_valide" }],
+      },
+    };
+  },
+
+  automation(o, calendar, id) {
+    const notify = o.notify ? `notify.${o.notify}` : "";
+    const names = Object.fromEntries(o.cars.map((c) => [c.id, c.name]));
+    const odometers = Object.fromEntries(o.cars.map((c) => [c.id, c.odometer || ""]));
+    const note = (title, message, data) => (notify ? [{ action: notify, data: { title, message, data } }] : []);
+    const text = (entity, value) => ({ action: "input_text.set_value", target: { entity_id: entity }, data: { value } });
+    const tpl = (v) => ({ condition: "template", value_template: v });
+    const litresFr = "{{ ('%g' % litres) | replace('.', ',') }}";
+    const totalFr = "{{ '%.2f' | format(total) | replace('.', ',') }}";
+    const consoFr = "{{ ('%g' % conso) | replace('.', ',') }}";
+    return {
+      id,
+      alias: AUTOMATION_ALIAS,
+      description: "Bip du tag NFC d'une voiture au plein : ouvre la page Plein, attend le bouton Enregistrer, vérifie et enregistre le plein (dernier plein, cumuls pour la consommation, calendrier). Créée par la carte Budget carburant.",
+      mode: "single",
+      max_exceeded: "silent",
+      triggers: o.cars.flatMap((c) => c.tags.map((t) => ({ trigger: "tag", tag_id: t, id: c.id }))),
+      conditions: [],
+      actions: [
+        { variables: { car: "{{ trigger.id }}" } },
+        {
+          variables: {
+            car_name: `{{ ${JSON.stringify(names)}.get(car, car) }}`,
+            odometer: `{{ ${JSON.stringify(odometers)}.get(car, '') }}`,
+            ctx: "{{ 'PLEIN_' ~ (car | upper) ~ '_' ~ (now().timestamp() | int) }}",
+            fuel_icons: FUEL_ICONS,
+          },
+        },
+        {
+          variables: {
+            last: "{% set s = states('input_text.plein_' ~ car ~ '_dernier') %}{{ s | from_json if s.startswith('{') else {} }}",
+            obd_km: "{{ states(odometer) | float(0) | round(0) if odometer and is_number(states(odometer)) else 0 }}",
+          },
+        },
+        { variables: { prev_km: "{{ last.km | default(0) | float(0) }}" } },
+        text(["input_text.plein_saisie_carburant", "input_text.plein_prix_au_litre", "input_text.plein_litres"], ""),
+        text("input_text.plein_kilometrage", "{% set k = obd_km if obd_km > 0 else prev_km %}{{ (k | int) if k > 0 else '' }}"),
+        text("input_text.plein_etape", "⛽ Plein {{ car_name }} : choisis le carburant, remplis, puis Enregistrer"),
+        ...(notify ? [{ action: notify, data: { message: "command_webview", data: { command: `/${PAGE_URL}/choix` } } }] : []),
+        ...note("Plein {{ car_name }}", "Remplis la page Plein puis touche Enregistrer (touche ici pour la rouvrir).", {
+          tag: "{{ ctx }}", clickAction: `/${PAGE_URL}/choix`, sticky: "true", color: "#1d93e3", notification_icon: "mdi:gas-station",
+        }),
+        { variables: { essais: 0, ok: false, fuel: "", price: 0, litres: 0, km: 0, err: "" } },
+        {
+          repeat: {
+            sequence: [
+              { wait_for_trigger: [{ trigger: "event", event_type: "plein_valide" }], timeout: "00:15:00", continue_on_timeout: true },
+              {
+                if: [tpl("{{ wait.trigger is none }}")],
+                then: [
+                  text("input_text.plein_etape", "❌ Plein {{ car_name }} annulé : pas enregistré à temps"),
+                  ...note("Plein {{ car_name }}", "Plein annulé : la page n'a pas été enregistrée.", { tag: "{{ ctx }}", notification_icon: "mdi:gas-station" }),
+                  { stop: "Pas d'enregistrement" },
+                ],
+              },
+              {
+                variables: {
+                  fuel: "{{ states('input_text.plein_saisie_carburant') }}",
+                  price: "{{ states('input_text.plein_prix_au_litre') | replace(',', '.') | replace(' ', '') | float(0) }}",
+                  litres: "{{ states('input_text.plein_litres') | replace(',', '.') | replace(' ', '') | float(0) }}",
+                  km: "{{ states('input_text.plein_kilometrage') | replace(' ', '') | float(0) | round(0) }}",
+                },
+              },
+              {
+                variables: {
+                  essais: "{{ essais + 1 }}",
+                  err: "{% if fuel not in fuel_icons %}choisis un carburant{% elif price <= 0 or price > 5 %}prix au litre incorrect ({{ price }} €){% elif litres <= 0 or litres > 150 %}litres incorrects ({{ litres }} L){% endif %}",
+                },
+              },
+              {
+                if: [tpl("{{ err == '' }}")],
+                then: [{ variables: { ok: true } }],
+                else: [text("input_text.plein_etape", "⚠️ {{ err | capitalize }} : corrige puis touche Enregistrer")],
+              },
+            ],
+            until: [tpl("{{ ok or essais >= 5 }}")],
+          },
+        },
+        {
+          if: [tpl("{{ not ok }}")],
+          then: [text("input_text.plein_etape", "❌ Plein {{ car_name }} non enregistré : trop d'erreurs, rebipe le tag"), { stop: "Saisie incorrecte" }],
+        },
+        {
+          variables: {
+            total: "{{ (price * litres) | round(2) }}",
+            dist: "{{ (km - prev_km) | round(0) if km > 0 and prev_km > 0 and km > prev_km else 0 }}",
+          },
+        },
+        { variables: { conso: "{{ (litres / dist * 100) | round(2) if dist > 0 else 0 }}" } },
+        {
+          action: "input_number.set_value", target: { entity_id: "input_number.plein_{{ car }}_depense_totale" },
+          data: { value: "{{ (states('input_number.plein_' ~ car ~ '_depense_totale') | float(0) + total) | round(2) }}" },
+        },
+        {
+          if: [tpl("{{ dist > 0 }}")],
+          then: [
+            {
+              action: "input_number.set_value", target: { entity_id: "input_number.plein_{{ car }}_litres_cumules" },
+              data: { value: "{{ (states('input_number.plein_' ~ car ~ '_litres_cumules') | float(0) + litres) | round(2) }}" },
+            },
+            {
+              action: "input_number.set_value", target: { entity_id: "input_number.plein_{{ car }}_km_cumules" },
+              data: { value: "{{ (states('input_number.plein_' ~ car ~ '_km_cumules') | float(0) + dist) | round(0) }}" },
+            },
+          ],
+        },
+        text("input_text.plein_{{ car }}_dernier",
+          "{{ {'d': now().isoformat(timespec='minutes'), 'f': fuel, 'l': litres, 'p': price, 't': total, 'km': (km if km > 0 else prev_km), 'c': conso} | to_json }}"),
+        {
+          action: "calendar.create_event", target: { entity_id: calendar },
+          data: {
+            summary: "Plein {{ car_name }}",
+            description: "{{ litres }} L · {{ fuel }} · {{ price }} €/L · {{ total }} €{% if km > 0 %} · {{ km | int }} km{% endif %}{% if conso > 0 %} · {{ conso }} L/100 km{% endif %}",
+            start_date_time: "{{ now() }}",
+            end_date_time: "{{ now() + timedelta(minutes=1) }}",
+          },
+        },
+        text("input_text.plein_etape",
+          `✔️ Plein {{ car_name }} enregistré : ${litresFr} L de {{ fuel_icons.get(fuel, '⛽') }} {{ fuel }}, ${totalFr} €{% if conso > 0 %} · ${consoFr} L/100 km{% endif %}`),
+        ...note("Plein {{ car_name }} enregistré",
+          `${litresFr} L de {{ fuel_icons.get(fuel, '⛽') }} {{ fuel }} à {{ ('%g' % price) | replace('.', ',') }} €/L, soit ${totalFr} €.{% if conso > 0 %} Consommation : ${consoFr} L/100 km sur {{ dist | int }} km.{% endif %}`,
+          { tag: "{{ ctx }}", notification_icon: "mdi:gas-station" }),
+        ...(notify && o.launcher ? [
+          { delay: { seconds: 3 } },
+          { action: notify, data: { message: "command_activity", data: { intent_action: "android.intent.action.MAIN", intent_package_name: o.launcher } } },
+        ] : []),
+      ],
+    };
+  },
+
+  /** Page « Plein » : pastilles de maison-chips-card si elle est installée, sinon cartes de Home Assistant. */
+  page(o, chips) {
+    const pick = (f) => ({ action: "perform-action", perform_action: "script.plein_choisir_carburant", data: { carburant: f } });
+    const title = (t) => (chips ? { type: "custom:maison-titre-card", title: t } : { type: "heading", heading: t });
+    const fuelCards = chips
+      ? [{
+        type: "custom:maison-chips-card", align: "center",
+        chips: FUELS.map((f) => ({
+          name: o.stations[f] ? `${f} · {state} €` : f, ...(o.stations[f] ? { entity: o.stations[f] } : {}),
+          icon: "mdi:gas-station", color: FUEL_COLORS[f], tap_action: pick(f), hold_action: { action: "none" },
+        })),
+      }]
+      : FUELS.map((f) => (o.stations[f]
+        ? { type: "tile", entity: o.stations[f], name: f, icon: "mdi:gas-station", tap_action: pick(f), grid_options: { columns: 6 } }
+        : { type: "button", name: f, icon: "mdi:gas-station", tap_action: pick(f), grid_options: { columns: 6 } }));
+    const save = { action: "perform-action", perform_action: "script.plein_valider" };
+    const cards = [
+      { type: "markdown", content: "{% set e = states('input_text.plein_etape') %}## {{ e if e not in ['', 'unknown', 'unavailable'] else '⛽ Choisis le carburant puis remplis le plein' }}" },
+      title("1 · Carburant"),
+      ...fuelCards,
+      {
+        type: "markdown",
+        content: `{% set f = states('input_text.plein_saisie_carburant') %}{% set ic = ${JSON.stringify(FUEL_ICONS)} %}### {{ ('Carburant choisi : ' ~ ic.get(f, '⛽') ~ ' ' ~ f) if f not in ['', 'unknown', 'unavailable'] else 'Touche un carburant ci-dessus' }}`,
+      },
+      title("2 · Plein"),
+      {
+        type: "entities", state_color: false,
+        entities: [
+          { entity: "input_text.plein_prix_au_litre", name: "Prix au litre (€)" },
+          { entity: "input_text.plein_litres", name: "Litres" },
+          { entity: "input_text.plein_kilometrage", name: "Kilométrage au compteur" },
+        ],
+      },
+      {
+        type: "markdown",
+        content: "{% set p = states('input_text.plein_prix_au_litre') | replace(',', '.') | float(0) %}{% set l = states('input_text.plein_litres') | replace(',', '.') | float(0) %}{% if p > 0 and l > 0 %}### Total : {{ '%.2f' | format(p * l) | replace('.', ',') }} €\n{{ ('%g' % l) | replace('.', ',') }} L × {{ ('%g' % p) | replace('.', ',') }} €/L{% else %}### Total : —\nRemplis le prix et les litres{% endif %}",
+      },
+      chips
+        ? { type: "custom:maison-chips-card", align: "center", chips: [{ name: "Enregistrer le plein", icon: "mdi:content-save", active: true, tap_action: save, hold_action: { action: "none" } }] }
+        : { type: "button", name: "Enregistrer le plein", icon: "mdi:content-save", tap_action: save },
+    ];
+    return chips
+      ? { views: [{ title: "Plein", path: "choix", icon: "mdi:gas-station", max_columns: 1, cards }] }
+      : { views: [{ title: "Plein", path: "choix", icon: "mdi:gas-station", type: "sections", max_columns: 1, sections: [{ type: "grid", cards }] }] };
+  },
+
+  /** Crée ou met à jour le tout. log(texte) décrit chaque étape. Les entrées existantes sont gardées
+   *  (avec leurs valeurs) ; scripts, automatisation et page sont réécrits. */
+  async run(hass, config, log) {
+    const o = INSTALL.normalize(config.install);
+    if (!hass.user?.is_admin) throw new Error("il faut un compte administrateur de Home Assistant");
+    if (!o.cars.length) throw new Error("ajoutez au moins une voiture");
+    if (!config.calendar) throw new Error("choisissez le calendrier de la carte");
+    const ids = new Set(o.cars.map((c) => c.id));
+    if (ids.size !== o.cars.length) throw new Error("deux voitures ont le même nom");
+
+    const existing = {};
+    for (const d of ["input_text", "input_number"]) {
+      existing[d] = new Set((await hass.callWS({ type: `${d}/list` })).map((x) => x.id));
+    }
+    let made = 0;
+    for (const h of INSTALL.helpers(o.cars)) {
+      if (existing[h.domain].has(h.id)) continue;
+      const res = await hass.callWS({ type: `${h.domain}/create`, name: h.name, ...h.opts });
+      if (res?.id && res.id !== h.id) throw new Error(`l'entrée « ${h.name} » a reçu l'identifiant ${res.id} au lieu de ${h.id}`);
+      made += 1;
+    }
+    log(made ? `${made} entrée${made > 1 ? "s" : ""} créée${made > 1 ? "s" : ""}` : "entrées déjà présentes");
+
+    for (const [id, cfg] of Object.entries(INSTALL.scripts(o))) await hass.callApi("POST", `config/script/config/${id}`, cfg);
+    log("scripts plein_choisir_carburant et plein_valider enregistrés");
+
+    const current = Object.values(hass.states).find((s) => s.entity_id.startsWith("automation.") && s.attributes?.friendly_name === AUTOMATION_ALIAS);
+    const autoId = current?.attributes?.id || "budget_carburant_plein_tag_nfc";
+    await hass.callApi("POST", `config/automation/config/${autoId}`, INSTALL.automation(o, config.calendar, autoId));
+    log(`automatisation « ${AUTOMATION_ALIAS} » ${current ? "mise à jour" : "créée"} (${o.cars.reduce((n, c) => n + c.tags.length, 0)} tag(s))`);
+
+    const boards = await hass.callWS({ type: "lovelace/dashboards/list" });
+    if (!boards.some((b) => b.url_path === PAGE_URL)) {
+      await hass.callWS({ type: "lovelace/dashboards/create", url_path: PAGE_URL, title: "Plein", icon: "mdi:gas-station", show_in_sidebar: false, require_admin: false, mode: "storage" });
+    }
+    const chips = !!customElements.get("maison-chips-card");
+    await hass.callWS({ type: "lovelace/config/save", url_path: PAGE_URL, config: INSTALL.page(o, chips) });
+    log(`page « Plein » enregistrée (/${PAGE_URL}/choix${chips ? "" : ", cartes de Home Assistant"})`);
+    if (!o.notify) log("pas de téléphone choisi : la page ne s'ouvrira pas toute seule au bip");
+  },
+};
+
+const INSTALL_STYLE = `<style>
+.bc-inst { margin-top: 24px; border-top: 1px solid var(--divider-color, #e0e0e0); padding-top: 16px; }
+.bc-inst h3 { margin: 0 0 6px; font-size: 1.05rem; font-weight: 500; }
+.bc-inst p { margin: 0 0 12px; color: var(--secondary-text-color, #666); font-size: .9rem; line-height: 1.4; }
+.bc-car { border: 1px solid var(--divider-color, #e0e0e0); border-radius: 12px; padding: 12px; margin-bottom: 10px; }
+.bc-car-h { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; font-weight: 500; }
+.bc-inst button { font: inherit; font-size: .9rem; padding: 8px 14px; border-radius: 8px; cursor: pointer;
+  border: 1px solid var(--divider-color, #ccc); background: transparent; color: var(--primary-color, #03a9f4); }
+.bc-inst button.bc-go { background: var(--primary-color, #03a9f4); color: var(--text-primary-color, #fff); border-color: transparent; }
+.bc-inst button[disabled] { opacity: .5; cursor: default; }
+.bc-row { display: flex; gap: 10px; flex-wrap: wrap; margin: 12px 0; }
+.bc-log { margin: 10px 0 0; padding: 0; list-style: none; font-size: .9rem; }
+.bc-log li { margin: 4px 0; }
+.bc-log .err { color: var(--error-color, #db4437); }
+</style>`;
+
+const CAR_SCHEMA = [
+  { name: "name", required: true, selector: { text: {} } },
+  { name: "tags", selector: { text: {} } },
+  { name: "odometer", selector: { entity: { domain: "sensor" } } },
+];
+const CAR_LABELS = {
+  name: "Nom de la voiture",
+  tags: "Tags NFC (séparés par des virgules ; vide : « Plein <nom> »)",
+  odometer: "Compteur kilométrique (facultatif : pré-remplit le kilométrage)",
+};
+const INSTALL_LABELS = {
+  notify: "Téléphone qui ouvre la page au bip",
+  launcher: "Après l'enregistrement, revenir à l'accueil (Android, facultatif) : paquet du lanceur",
+  ...Object.fromEntries(FUELS.map((f) => [`station_${f.toLowerCase()}`, `Prix du jour ${f} (facultatif)`])),
+};
+
+/** Éditeur de la carte, avec en dessous l'installation du suivi des pleins. */
+class BudgetCarburantCardEditor extends makeEditor(SCHEMA, LABELS, PLEINS_DEFAULTS) {
+  _draw() {
+    super._draw();
+    if (this._hass && this._config) this._drawInstall();
+  }
+
+  _setInstall(install) {
+    this._config = { ...this._config, install };
+    this._emit();
+  }
+
+  _drawInstall() {
+    const inst = this._config.install || {};
+    const cars = Array.isArray(inst.cars) && inst.cars.length ? inst.cars : [{ name: "" }];
+    if (!this._inst) {
+      this._inst = document.createElement("div");
+      this._inst.className = "bc-inst";
+      this._inst.innerHTML = `${INSTALL_STYLE}<h3>Installation du suivi des pleins</h3>
+        <p>Crée dans Home Assistant les entrées, les scripts, l'automatisation du tag NFC et la page « Plein »
+        (adresse /${PAGE_URL}/choix). À relancer après avoir ajouté une voiture : les pleins déjà notés sont gardés.
+        Les tags s'écrivent avec l'application (Paramètres › Tags).</p>
+        <div class="bc-cars"></div>
+        <div class="bc-row"><button type="button" class="bc-add">Ajouter une voiture</button></div>
+        <div class="bc-glob"></div>
+        <div class="bc-row"><button type="button" class="bc-go">Installer ou mettre à jour</button></div>
+        <ul class="bc-log"></ul>`;
+      this._inst.querySelector(".bc-add").addEventListener("click", () => {
+        const cur = this._config.install || {};
+        const list = Array.isArray(cur.cars) && cur.cars.length ? cur.cars : [{ name: "" }];
+        this._setInstall({ ...cur, cars: [...list, { name: "" }] });
+        this._drawInstall();
+      });
+      this._inst.querySelector(".bc-go").addEventListener("click", () => this._install());
+      this.appendChild(this._inst);
+    }
+    const box = this._inst.querySelector(".bc-cars");
+    while (box.children.length > cars.length) box.lastChild.remove();
+    cars.forEach((car, k) => {
+      let el = box.children[k];
+      if (!el) {
+        el = document.createElement("div");
+        el.className = "bc-car";
+        el.innerHTML = `<div class="bc-car-h"><span></span><button type="button">Retirer</button></div>`;
+        const form = document.createElement("ha-form");
+        form.computeLabel = (s) => CAR_LABELS[s.name] || s.name;
+        form.schema = CAR_SCHEMA;
+        form.addEventListener("value-changed", (ev) => {
+          const cur = this._config.install || {};
+          const list = [...(Array.isArray(cur.cars) && cur.cars.length ? cur.cars : [{ name: "" }])];
+          list[Number(el.dataset.k)] = { ...ev.detail.value };
+          this._setInstall({ ...cur, cars: list });
+        });
+        el.querySelector("button").addEventListener("click", () => {
+          const cur = this._config.install || {};
+          const list = [...(cur.cars || [])];
+          list.splice(Number(el.dataset.k), 1);
+          this._setInstall({ ...cur, cars: list });
+          this._drawInstall();
+        });
+        el.appendChild(form);
+        box.appendChild(el);
+      }
+      el.dataset.k = k;
+      el.querySelector(".bc-car-h span").textContent = `Voiture ${k + 1}`;
+      const form = el.querySelector("ha-form");
+      form.hass = this._hass;
+      form.data = { ...car };
+    });
+
+    if (!this._glob) {
+      this._glob = document.createElement("ha-form");
+      this._glob.computeLabel = (s) => INSTALL_LABELS[s.name] || s.name;
+      this._glob.addEventListener("value-changed", (ev) => {
+        const cur = this._config.install || {};
+        const { cars: _cars, ...rest } = ev.detail.value;
+        this._setInstall({ ...rest, cars: cur.cars || [] });
+      });
+      this._inst.querySelector(".bc-glob").appendChild(this._glob);
+    }
+    const phones = Object.keys(this._hass.services?.notify || {}).filter((s) => s.startsWith("mobile_app_")).sort();
+    this._glob.hass = this._hass;
+    this._glob.schema = [
+      { name: "notify", selector: { select: { mode: "dropdown", options: [{ value: "", label: "Aucun" }, ...phones.map((p) => ({ value: p, label: p.replace(/^mobile_app_/, "") }))] } } },
+      ...FUELS.map((f) => ({ name: `station_${f.toLowerCase()}`, selector: { entity: { domain: "sensor" } } })),
+      { name: "launcher", selector: { text: {} } },
+    ];
+    const { cars: _c, ...glob } = inst;
+    this._glob.data = glob;
+    const go = this._inst.querySelector(".bc-go");
+    const admin = !!this._hass.user?.is_admin;
+    go.disabled = !admin || this._busy;
+    go.title = admin ? "" : "Réservé aux administrateurs";
+  }
+
+  async _install() {
+    const log = this._inst.querySelector(".bc-log");
+    const add = (t, err) => { const li = document.createElement("li"); li.textContent = `${err ? "✖" : "✔"} ${t}`; if (err) li.className = "err"; log.appendChild(li); };
+    log.innerHTML = "";
+    this._busy = true;
+    this._drawInstall();
+    try {
+      await INSTALL.run(this._hass, this._config, (t) => add(t));
+      add("installation terminée");
+    } catch (err) {
+      add(`installation arrêtée : ${err?.body?.message || err?.message || err}`, true);
+    }
+    this._busy = false;
+    this._drawInstall();
+  }
+}
 
 /* ---------------------------------------------------------- enregistrement */
 
@@ -866,4 +1311,4 @@ if (typeof customElements !== "undefined") {
   console.info(`%c BUDGET-CARBURANT %c ${CARD_VERSION} `, "background:#FF9100;color:#1a2434;font-weight:700", "background:#1d93e3;color:#fff");
 }
 
-if (typeof module !== "undefined") module.exports = { PLEINS };
+if (typeof module !== "undefined") module.exports = { PLEINS, INSTALL };
