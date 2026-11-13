@@ -15,7 +15,7 @@ le plein ». Le plein est noté dans le calendrier, et la carte fait le reste.
 
 | Fichier | Rôle |
 | --- | --- |
-| `budget-carburant-card.js` | la carte `custom:budget-carburant-card` |
+| `budget-carburant-card.js` | la carte `custom:budget-carburant-card`, qui peut installer tout le suivi depuis son éditeur |
 | `packages/budget_carburant.yaml` | les entrées, les scripts et l'automatisation du tag NFC (package Home Assistant) |
 | `docs/page-plein.yaml` | la page « Plein » que le téléphone ouvre au bip du tag |
 
@@ -31,7 +31,31 @@ Installation manuelle : copiez `budget-carburant-card.js` dans `/config/www/` et
 ressource `/local/budget-carburant-card.js` (type module) dans **Paramètres › Tableaux de bord ›
 Ressources**.
 
-## Installation du suivi des pleins
+## Installation du suivi des pleins depuis la carte (recommandé)
+
+Sans fichier à copier ni redémarrage, avec un compte administrateur :
+
+1. Créez un calendrier local (**Paramètres › Appareils et services › Ajouter une intégration ›
+   Calendrier local**) ou gardez le vôtre.
+2. Ajoutez la carte à un tableau de bord et ouvrez son éditeur. Sous les options de la carte, la
+   partie **Installation du suivi des pleins** demande :
+   - vos voitures : nom, tags NFC (par défaut « Plein &lt;nom&gt; »), compteur kilométrique facultatif ;
+   - le téléphone qui ouvre la page au bip ;
+   - les capteurs de prix du jour de votre station, pour chaque carburant (facultatif) ;
+   - le paquet du lanceur Android pour revenir à l'accueil après l'enregistrement (facultatif).
+3. Touchez **Installer ou mettre à jour**. La carte crée les entrées, les scripts, l'automatisation
+   « Plein de carburant (tag NFC) » et la page « Plein » (`/plein-carburant/choix`), et affiche
+   chaque étape.
+4. Écrivez un tag NFC par voiture avec l'application Home Assistant (**Paramètres › Tags › Ajouter
+   un tag**), avec l'identifiant indiqué pour la voiture.
+
+Pour ajouter une voiture plus tard, ajoutez-la dans l'éditeur et relancez l'installation : les
+entrées et les pleins déjà notés sont gardés ; les scripts, l'automatisation et la page sont
+réécrits. La page utilise les pastilles de
+[maison-chips-card](https://github.com/Marlboro62/maison-ha-cards) si elle est installée, sinon
+des cartes de Home Assistant.
+
+## Installation du suivi des pleins en YAML
 
 1. Créez un calendrier local (**Paramètres › Appareils et services › Ajouter une intégration ›
    Calendrier local**) ou gardez le vôtre.
@@ -76,6 +100,7 @@ calendar: calendar.home
 | `history` | `5` | derniers pleins affichés |
 | `theme` | `v2` | `v2` bleu nuit, `auto` bleu nuit ou clair selon Home Assistant, `ha` thème Home Assistant |
 | `font_size` | `100` | taille du texte en % |
+| `install` | | réglages de l'installation (voitures, téléphone, prix), remplis par l'éditeur |
 
 Toutes les options se règlent aussi dans l'éditeur visuel.
 
