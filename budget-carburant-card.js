@@ -14,7 +14,7 @@
  * Style repris de la carte Enedis Linky New (content-card-linky-new), du même auteur.
  */
 
-const CARD_VERSION = "1.0.0-beta.10";
+const CARD_VERSION = "1.0.0-beta.11";
 
 /* ------------------------------------------------------------- affichage */
 
@@ -1202,7 +1202,7 @@ const INSTALL = {
 
   /** Crée ou met à jour le tout. log(texte) décrit chaque étape. Les entrées existantes sont gardées
    *  (avec leurs valeurs) ; scripts, automatisation et page sont réécrits. */
-  async run(hass, config, log) {
+  async run(hass, config, log, confirm = () => true) {
     const o = INSTALL.normalize(config.install);
     if (!hass.user?.is_admin) throw new Error("il faut un compte administrateur de Home Assistant");
     if (!o.cars.length) throw new Error("ajoutez au moins une voiture");
@@ -1211,6 +1211,14 @@ const INSTALL = {
     if (!hass.states[calendar]) throw new Error(`le calendrier ${calendar} n'existe pas : choisissez-en un dans les options de la carte`);
     const ids = new Set(o.cars.map((c) => c.id));
     if (ids.size !== o.cars.length) throw new Error("deux voitures ont le même nom");
+
+    // une voiture suivie par l'automatisation en place mais absente de la liste cesserait d'être suivie
+    const current = Object.values(hass.states).find((s) => s.entity_id.startsWith("automation.") && s.attributes?.friendly_name === AUTOMATION_ALIAS);
+    if (current?.attributes?.id) {
+      const prev = await hass.callApi("GET", `config/automation/config/${current.attributes.id}`).catch(() => null);
+      const lost = (prev ? INSTALL.fromExisting(prev).cars : []).filter((c) => !ids.has(INSTALL.slug(c.name)));
+      if (lost.length && !(await confirm(lost.map((c) => c.name)))) throw new Error(`annulée : ${lost.map((c) => c.name).join(", ")} manque dans la liste des voitures`);
+    }
 
     const existing = {};
     for (const d of ["input_text", "input_number"]) {
@@ -1228,7 +1236,6 @@ const INSTALL = {
     for (const [id, cfg] of Object.entries(INSTALL.scripts(o))) await hass.callApi("POST", `config/script/config/${id}`, cfg);
     log("scripts plein_choisir_carburant et plein_valider enregistrés");
 
-    const current = Object.values(hass.states).find((s) => s.entity_id.startsWith("automation.") && s.attributes?.friendly_name === AUTOMATION_ALIAS);
     const autoId = current?.attributes?.id || "budget_carburant_plein_tag_nfc";
     await hass.callApi("POST", `config/automation/config/${autoId}`, INSTALL.automation(o, calendar, autoId));
     log(`automatisation « ${AUTOMATION_ALIAS} » ${current ? "mise à jour" : "créée"} (${o.cars.reduce((n, c) => n + c.tags.length, 0)} tag(s))`);
@@ -1237,7 +1244,7 @@ const INSTALL = {
     if (!boards.some((b) => b.url_path === PAGE_URL)) {
       await hass.callWS({ type: "lovelace/dashboards/create", url_path: PAGE_URL, title: "Plein", icon: "mdi:gas-station", show_in_sidebar: false, require_admin: false, mode: "storage" });
     }
-    const chips = !!customElements.get("maison-chips-card");
+    const chips = typeof customElements !== "undefined" && !!customElements.get("maison-chips-card");
     await hass.callWS({ type: "lovelace/config/save", url_path: PAGE_URL, config: INSTALL.page(o, chips) });
     log(`page « Plein » enregistrée (/${PAGE_URL}/choix${chips ? "" : ", cartes de Home Assistant"})`);
     if (!o.notify) log("pas de téléphone choisi : la page ne s'ouvrira pas toute seule au bip");
@@ -1415,7 +1422,8 @@ class BudgetCarburantCardEditor extends makeEditor(SCHEMA, LABELS, PLEINS_DEFAUL
     this._busy = true;
     this._drawInstall();
     try {
-      await INSTALL.run(this._hass, this._config, (t) => add(t));
+      await INSTALL.run(this._hass, this._config, (t) => add(t), (lost) => window.confirm(
+        `${lost.join(", ")} ${lost.length > 1 ? "sont suivies" : "est suivie"} aujourd'hui mais ${lost.length > 1 ? "manquent" : "manque"} dans la liste des voitures : ${lost.length > 1 ? "elles ne seront" : "elle ne sera"} plus suivie${lost.length > 1 ? "s" : ""} (tag sans effet). Ses pleins déjà notés restent dans le calendrier.\n\nInstaller quand même ?`));
       add("installation terminée");
     } catch (err) {
       add(`installation arrêtée : ${err?.body?.message || err?.message || err}`, true);
