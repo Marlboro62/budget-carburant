@@ -14,7 +14,7 @@
  * Style repris de la carte Enedis Linky New (content-card-linky-new), du même auteur.
  */
 
-const CARD_VERSION = "1.0.0-beta.2";
+const CARD_VERSION = "1.0.0-beta.3";
 
 /* ------------------------------------------------------------- affichage */
 
@@ -1107,6 +1107,40 @@ const INSTALL = {
       : { views: [{ title: "Plein", path: "choix", icon: "mdi:gas-station", type: "sections", max_columns: 1, sections: [{ type: "grid", cards }] }] };
   },
 
+  /** Réglages de l'installation repris d'une automatisation et d'un script déjà en place (installation faite
+   *  à la main ou par une version précédente), pour ne rien perdre en relançant l'installation. */
+  fromExisting(auto, script) {
+    const tags = {};
+    for (const t of auto?.triggers || auto?.trigger || []) {
+      if ((t.trigger || t.platform) === "tag" && t.id && t.tag_id) (tags[t.id] ||= []).push(t.tag_id);
+    }
+    const vars = Object.assign({}, ...(auto?.actions || auto?.action || []).filter((a) => a.variables).map((a) => a.variables));
+    // « {{ {"laguna": "Laguna"}.get(car, car) }} » ou « {{ 'Laguna' if car == 'laguna' else 'SLK' }} »
+    const mapOf = (tpl) => {
+      const s = String(tpl || "");
+      const j = /\{\{\s*(\{.*\})\.get\(/.exec(s);
+      if (j) { try { return JSON.parse(j[1]); } catch (e) { /* forme ternaire */ } }
+      const out = {};
+      for (const m of s.matchAll(/'([^']*)'\s+if\s+car\s*==\s*'([^']+)'/g)) out[m[2]] = m[1];
+      const e = /else\s+'([^']*)'\s*\}\}/.exec(s);
+      if (e) out[" else"] = e[1];
+      return out;
+    };
+    const names = mapOf(vars.car_name), odos = mapOf(vars.odometer);
+    const cars = Object.entries(tags).map(([id, list]) => ({
+      name: names[id] ?? names[" else"] ?? id,
+      tags: list.join(", "),
+      odometer: odos[id] ?? odos[" else"] ?? "",
+    }));
+    const steps = auto?.actions || auto?.action || [];
+    const notify = steps.map((a) => a.action || a.service || "").find((a) => a.startsWith("notify.mobile_app_"));
+    const launch = steps.find((a) => a.data?.message === "command_activity");
+    const out = { cars, notify: notify ? notify.slice(7) : "", launcher: launch?.data?.data?.intent_package_name || "" };
+    const st = (script?.sequence || []).find((a) => a.variables?.stations)?.variables.stations || {};
+    for (const f of FUELS) if (st[f]) out[`station_${f.toLowerCase()}`] = st[f];
+    return out;
+  },
+
   /** Crée ou met à jour le tout. log(texte) décrit chaque étape. Les entrées existantes sont gardées
    *  (avec leurs valeurs) ; scripts, automatisation et page sont réécrits. */
   async run(hass, config, log) {
@@ -1193,7 +1227,33 @@ class BudgetCarburantCardEditor extends makeEditor(SCHEMA, LABELS, PLEINS_DEFAUL
     this._emit();
   }
 
+  /** Première ouverture sans réglages d'installation : les reprendre de l'automatisation déjà en place. */
+  _current() {
+    return Object.values(this._hass.states).find((s) => s.entity_id.startsWith("automation.") && s.attributes?.friendly_name === AUTOMATION_ALIAS);
+  }
+
+  /** force : bouton « Reprendre l'installation en place » (remplace les réglages saisis). */
+  async _prefill(force = false) {
+    this._prefilled = true;
+    const cur = force ? {} : this._config.install || {};
+    if ((cur.cars || []).some((c) => c?.name) || !this._hass.user?.is_admin) return;
+    const st = this._current();
+    if (!st?.attributes?.id) return;
+    try {
+      const auto = await this._hass.callApi("GET", `config/automation/config/${st.attributes.id}`);
+      const script = await this._hass.callApi("GET", "config/script/config/plein_choisir_carburant").catch(() => null);
+      const found = INSTALL.fromExisting(auto, script);
+      if (!found.cars.length) return;
+      this._setInstall({ ...found, ...Object.fromEntries(Object.entries(cur).filter(([k, v]) => k !== "cars" && v)) });
+      this._drawInstall();
+      const li = document.createElement("li");
+      li.textContent = "ℹ Réglages repris de l'installation déjà en place : vérifiez-les, puis installez.";
+      this._inst.querySelector(".bc-log").replaceChildren(li);
+    } catch (e) { /* pas de reprise : formulaire vide */ }
+  }
+
   _drawInstall() {
+    if (!this._prefilled) this._prefill();
     const inst = this._config.install || {};
     const cars = Array.isArray(inst.cars) && inst.cars.length ? inst.cars : [{ name: "" }];
     if (!this._inst) {
@@ -1204,7 +1264,8 @@ class BudgetCarburantCardEditor extends makeEditor(SCHEMA, LABELS, PLEINS_DEFAUL
         (adresse /${PAGE_URL}/choix). À relancer après avoir ajouté une voiture : les pleins déjà notés sont gardés.
         Les tags s'écrivent avec l'application (Paramètres › Tags).</p>
         <div class="bc-cars"></div>
-        <div class="bc-row"><button type="button" class="bc-add">Ajouter une voiture</button></div>
+        <div class="bc-row"><button type="button" class="bc-add">Ajouter une voiture</button>
+          <button type="button" class="bc-take" hidden>Reprendre l'installation en place</button></div>
         <div class="bc-glob"></div>
         <div class="bc-row"><button type="button" class="bc-go">Installer ou mettre à jour</button></div>
         <ul class="bc-log"></ul>`;
@@ -1215,6 +1276,7 @@ class BudgetCarburantCardEditor extends makeEditor(SCHEMA, LABELS, PLEINS_DEFAUL
         this._drawInstall();
       });
       this._inst.querySelector(".bc-go").addEventListener("click", () => this._install());
+      this._inst.querySelector(".bc-take").addEventListener("click", () => this._prefill(true));
       this.appendChild(this._inst);
     }
     const box = this._inst.querySelector(".bc-cars");
@@ -1274,6 +1336,7 @@ class BudgetCarburantCardEditor extends makeEditor(SCHEMA, LABELS, PLEINS_DEFAUL
     const admin = !!this._hass.user?.is_admin;
     go.disabled = !admin || this._busy;
     go.title = admin ? "" : "Réservé aux administrateurs";
+    this._inst.querySelector(".bc-take").hidden = !admin || !this._current();
   }
 
   async _install() {
