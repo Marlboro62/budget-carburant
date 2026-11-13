@@ -14,7 +14,7 @@
  * Style repris de la carte Enedis Linky New (content-card-linky-new), du même auteur.
  */
 
-const CARD_VERSION = "1.0.0-beta.12";
+const CARD_VERSION = "1.0.0-beta.13";
 
 /* ------------------------------------------------------------- affichage */
 
@@ -522,7 +522,7 @@ const STYLE_BASE = `<style>
   --t-blue: #3f7ff0; --t-white: #e9eef4; --t-red: #ee4a4a;
   --med-up: #f08a4b; --med-down: #5fcf8a;
 }
-ha-card { background: var(--med-bg); color: var(--med-text); border: 1px solid var(--med-line);
+ha-card { display: block; background: var(--med-bg); color: var(--med-text); border: 1px solid var(--med-line);
   border-radius: 18px; overflow: hidden; font-variant-numeric: tabular-nums; container-type: inline-size; }
 header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 18px 8px; flex-wrap: wrap; }
 .brand { display: flex; align-items: center; gap: 10px; }
