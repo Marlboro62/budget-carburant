@@ -14,7 +14,7 @@
  * Style repris de la carte Enedis Linky New (content-card-linky-new), du même auteur.
  */
 
-const CARD_VERSION = "1.0.0-beta.5";
+const CARD_VERSION = "1.0.0-beta.6";
 
 /* ------------------------------------------------------------- affichage */
 
@@ -323,16 +323,22 @@ class BudgetCarburantCard extends HTMLElement {
       this.shadowRoot.innerHTML = `${head}<ha-card class="${theme} gas"${hcHpStyle(c)}><div class="empty"><span>Lecture des pleins…</span></div></ha-card>`;
       return;
     }
-    const cars = [...new Set(this._events.map((e) => e.car))].sort();
-    if (!this._car || !cars.includes(this._car)) this._car = c.car && cars.includes(c.car) ? c.car : cars[0];
-    if (!cars.length) {
-      this.shadowRoot.innerHTML = `${head}<ha-card class="${theme} gas"${hcHpStyle(c)}>${this._header(null)}<div class="empty">
-        <strong>Aucun plein dans ${esc(c.calendar)}</strong>
-        <span>La carte lit les événements « ${esc(c.prefix)}&lt;voiture&gt; » écrits à chaque plein (automatisation du tag NFC).</span>
+    // voitures : celles qui ont des pleins, plus celles de l'installation (onglet même sans plein)
+    const known = (c.install?.cars || []).map((x) => String(x?.name || "").trim()).filter(Boolean);
+    const cars = [...new Set([...this._events.map((e) => e.car), ...known])].sort();
+    // voiture imposée par l'option car : toujours elle, jamais une autre
+    if (c.car) this._car = c.car;
+    else if (!this._car || !cars.includes(this._car)) this._car = cars[0];
+    const fills = this._events.filter((e) => e.car === this._car);
+    if (!fills.length) {
+      const tabs = !c.car && cars.length > 1 ? this._tabs(cars) : "";
+      this.shadowRoot.innerHTML = `${head}<ha-card class="${theme} gas"${hcHpStyle(c)}>${this._header(null)}${tabs}<div class="empty">
+        <strong>${this._car ? `Aucun plein pour ${esc(this._car)}` : `Aucun plein dans ${esc(c.calendar)}`}</strong>
+        <span>La carte lit les événements « ${esc(c.prefix)}${this._car ? esc(this._car) : "&lt;voiture&gt;"} » écrits à chaque plein (automatisation du tag NFC).</span>
         ${this._error ? `<span>Calendrier illisible : ${esc(this._error)}</span>` : ""}</div></ha-card>`;
       return;
     }
-    const s = PLEINS.stats(this._events.filter((e) => e.car === this._car), new Date());
+    const s = PLEINS.stats(fills, new Date());
     this.shadowRoot.innerHTML = `${head}<ha-card class="${theme} gas"${hcHpStyle(c)}>
       ${this._header(s)}${!c.car && cars.length > 1 ? this._tabs(cars) : ""}${this._hero(s)}${this._tiles(s)}${this._fuels(s)}${this._chart(s)}${this._history(s)}
       <footer>${s.fills.some((x) => x.kmError) ? "⚠ kilométrage plus bas que le plein précédent : corriger l'événement dans le calendrier. " : ""}Consommation calculée de plein à plein : remplir le réservoir à chaque plein.</footer></ha-card>`;
