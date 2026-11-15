@@ -142,6 +142,7 @@ calendar: calendar.home
 | `months` | `6` | mois dans le graphique des dépenses (3 à 12) |
 | `history` | `5` | derniers pleins affichés |
 | `folded` | `true` | « Par carburant », « Dépenses » et « Derniers pleins » repliés au départ (touchez le titre pour les ouvrir) |
+| `e85_compare` | `auto` | essence comparée à l'E85 pour le prix maximum : `auto` (l'essence la plus roulée), `SP95`, `SP98`, `E10`, ou `off` pour ne pas l'afficher |
 | `theme` | `v2` | `v2` bleu nuit, `auto` bleu nuit ou clair selon Home Assistant, `ha` thème Home Assistant |
 | `font_size` | `100` | taille du texte en % |
 | `install` | | réglages de l'installation (voitures, téléphone, prix), remplis par l'éditeur |
@@ -155,6 +156,10 @@ Toutes les options se règlent aussi dans l'éditeur visuel.
 - **Kilomètres** : distance suivie, compteur, coût aux 100 km.
 - **Budget** : par jour (après 7 jours et deux pleins), total, litres.
 - **Par carburant** : pleins, litres, dépense et consommation de chaque carburant.
+- **E85 contre essence** (si la voiture roule aux deux) : surconsommation mesurée de l'E85, **prix maximum
+  de l'E85** au-delà duquel il coûte plus cher aux 100 km que l'essence, et comparaison aux 100 km avec
+  les derniers prix notés. Prix maximum = prix de l'essence × conso en essence / conso en E85.
+  Il faut au moins un plein de plein à plein de chaque carburant ; la mesure s'affine avec les pleins.
 - **Dépenses des derniers mois** en graphique, puis les **derniers pleins**.
 
 ### Comment la consommation est calculée

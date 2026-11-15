@@ -14,7 +14,7 @@
  * Style repris de la carte Enedis Linky New (content-card-linky-new), du même auteur.
  */
 
-const CARD_VERSION = "1.0.0";
+const CARD_VERSION = "1.1.0-beta.1";
 
 /* ------------------------------------------------------------- affichage */
 
@@ -173,6 +173,7 @@ const PLEINS_DEFAULTS = {
   months: 6,
   history: 5,
   folded: true,
+  e85_compare: "auto",
   theme: "v2",
   font_size: 100,
 };
@@ -217,10 +218,11 @@ const PLEINS = {
     // ses litres sont reportés sur le plein suivant ; une conso hors 3–30 L/100 km n'est pas comptée.
     let litresConso = 0, costConso = 0, dist = 0, ref = null, firstRef = null, pendL = 0, pendCost = 0, multi = false;
     const byFuel = {};
-    const fuelStat = (k) => (byFuel[k] ||= { count: 0, litres: 0, cost: 0, consoL: 0, consoKm: 0 });
+    const fuelStat = (k) => (byFuel[k] ||= { count: 0, litres: 0, cost: 0, consoL: 0, consoKm: 0, consoN: 0, lastPrice: null });
     f.forEach((x) => {
       const s = fuelStat(x.fuel || "?");
       s.count += 1; s.litres += x.litres; s.cost += x.total || 0;
+      if (x.price !== null && x.price > 0) s.lastPrice = x.price; // pleins triés : le dernier prix gagne
       x.kmError = false;
       if (ref === null) {
         if (x.km !== null) ref = firstRef = x;
@@ -234,7 +236,7 @@ const PLEINS = {
       const dd = x.km - ref.km, L = pendL + x.litres, c = (L / dd) * 100;
       if (c >= 3 && c <= 30) {
         litresConso += L; costConso += pendCost + (x.total || 0); dist += dd;
-        if (!multi) { const ps = fuelStat(ref.fuel || "?"); ps.consoL += L; ps.consoKm += dd; }
+        if (!multi) { const ps = fuelStat(ref.fuel || "?"); ps.consoL += L; ps.consoKm += dd; ps.consoN += 1; }
       }
       ref = x; pendL = 0; pendCost = 0; multi = false;
     });
@@ -421,7 +423,33 @@ class BudgetCarburantCard extends HTMLElement {
     if (!rows.length) return "";
     return `<section class="bills"><div class="chart-h"><span>Par carburant</span></div>${rows.map(([k, v]) => `<div class="bill">
       <span><i class="pl-dot" style="background:${FUEL_COLORS[k] || "var(--med-gas)"}"></i>${esc(k)} · ${v.count} plein${v.count > 1 ? "s" : ""} · ${fmt(v.litres, 0)} L · ${euro(v.cost)}</span>
-      <b>${v.consoKm > 0 ? `${fmt((v.consoL / v.consoKm) * 100, 1)} L/100` : "—"}</b></div>`).join("")}</section>`;
+      <b>${v.consoKm > 0 ? `${fmt((v.consoL / v.consoKm) * 100, 1)} L/100` : "—"}</b></div>`).join("")}${this._ethanol(s)}</section>`;
+  }
+
+  /** E85 contre essence : surconsommation mesurée de plein à plein, et prix maximum de l'E85 au-delà duquel
+   *  il coûte plus cher aux 100 km que l'essence (prix maximum = prix de l'essence × conso essence / conso E85). */
+  _ethanol(s) {
+    const e = s.byFuel.E85, ref = String(this._config.e85_compare || "auto");
+    if (ref === "off") return "";
+    const petrol = (ref === "auto" ? ["SP95", "SP98", "E10"] : [ref]).map((k) => [k, s.byFuel[k]]).filter(([, v]) => v)
+      .sort((a, b) => b[1].consoKm - a[1].consoKm || b[1].count - a[1].count)[0];
+    if (!e || !petrol) return "";
+    const [pk, p] = petrol;
+    if (!(e.consoKm > 0) || !(p.consoKm > 0)) {
+      return `<div class="pl-e85"><span>⚖ Prix maximum de l'E85 : connu après un plein de plein à plein de chaque carburant (E85 et ${esc(pk)}).</span></div>`;
+    }
+    const ce = (e.consoL / e.consoKm) * 100, cp = (p.consoL / p.consoKm) * 100;
+    const over = (ce / cp - 1) * 100;
+    const rows = [`<span>⚖ E85 : <b>${over >= 0 ? "+" : "−"}${fmt(Math.abs(over), 0)} %</b> de consommation par rapport au ${esc(pk)}${e.consoN < 2 || p.consoN < 2 ? " (estimation, à affiner avec d'autres pleins)" : ""}</span>`];
+    if (p.lastPrice !== null) {
+      const max = (p.lastPrice * cp) / ce;
+      rows.push(`<span>Rentable tant que l'E85 coûte moins de <b>${fmt(max, 3)} €/L</b> (${esc(pk)} à ${fmt(p.lastPrice, 3)} €/L)</span>`);
+      if (e.lastPrice !== null) {
+        const ok = e.lastPrice <= max;
+        rows.push(`<span>Aux 100 km : E85 ${euro(ce * e.lastPrice)} · ${esc(pk)} ${euro(cp * p.lastPrice)} · <b class="${ok ? "ok" : "ko"}">${ok ? "✔ E85 gagnant" : "✘ E85 plus cher"}</b></span>`);
+      }
+    }
+    return `<div class="pl-e85">${rows.join("")}</div>`;
   }
 
   _chart(s) {
@@ -469,6 +497,10 @@ const PLEINS_STYLE = `<style>
 .hero-v .pl-dot { width: 12px; height: 12px; margin-left: 10px; }
 .hero-v .pl-fuel { font-size: 1rem; color: var(--med-text); font-weight: 600; margin-left: 0; }
 .chart rect.pl-bar { fill: var(--med-gas); }
+.pl-e85 { display: grid; gap: 4px; padding: 8px 12px; border: 1px dashed var(--med-line); border-radius: 12px; font-size: .85rem; color: var(--med-muted); }
+.pl-e85 b { color: var(--med-text); }
+.pl-e85 b.ok { color: #2fb36b; }
+.pl-e85 b.ko { color: #e5483f; }
 </style>`;
 
 const GAS_STYLE = `<style>
@@ -879,6 +911,10 @@ const SCHEMA = [
   { name: "months", selector: { number: { min: 3, max: 12, step: 1, mode: "box", unit_of_measurement: "mois" } } },
   { name: "history", selector: { number: { min: 1, max: 20, step: 1, mode: "box" } } },
   { name: "folded", selector: { boolean: {} } },
+  { name: "e85_compare", selector: { select: { mode: "dropdown", options: [
+    { value: "auto", label: "Automatique (l'essence la plus roulée)" },
+    { value: "SP95", label: "SP95" }, { value: "SP98", label: "SP98" }, { value: "E10", label: "E10" },
+    { value: "off", label: "Ne pas afficher" }] } } },
   THEME_SELECT,
   { name: "font_size", selector: { number: { min: 70, max: 150, step: 5, mode: "slider", unit_of_measurement: "%" } } },
 ];
@@ -890,6 +926,7 @@ const LABELS = {
   months: "Mois dans le graphique des dépenses",
   history: "Derniers pleins affichés",
   folded: "Par carburant, dépenses et derniers pleins repliés au départ",
+  e85_compare: "E85 : essence de comparaison pour le prix maximum (si la voiture roule à l'E85)",
   theme: "Couleurs de la carte",
   font_size: "Taille du texte",
 };
