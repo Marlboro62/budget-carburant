@@ -63,9 +63,15 @@ Carburants reconnus : SP98, SP95, E10, E85 (éthanol), Gazole et GPL, chacun ave
 
 ## Installation de la carte
 
-Dans **Paramètres › Marketplace** (ou HACS avant la 2026.11), ajoutez ce dépôt comme dépôt
-personnalisé de type **Tableau de bord** : `https://github.com/Marlboro62/budget-carburant`,
-installez **Budget carburant**, puis rechargez la page (Ctrl+F5).
+[![Ouvrir dans Home Assistant](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=Marlboro62&repository=budget-carburant&category=plugin)
+
+1. Ouvrez **Paramètres › Marketplace** (ou HACS avant la 2026.11), ou utilisez le bouton
+   ci-dessus.
+2. Cherchez **Budget carburant**, installez-la, puis rechargez la page (Ctrl+F5).
+
+Si la carte n'apparaît pas dans la recherche, ajoutez-la comme dépôt personnalisé : menu **⋮ ›
+Dépôts personnalisés**, adresse `https://github.com/Marlboro62/budget-carburant`, type
+**Tableau de bord**, puis reprenez l'étape 2.
 
 Installation manuelle : copiez `budget-carburant-card.js` dans `/config/www/` et ajoutez la
 ressource `/local/budget-carburant-card.js` (type module) dans **Paramètres › Tableaux de bord ›
