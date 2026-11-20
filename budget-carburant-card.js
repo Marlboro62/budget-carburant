@@ -17,7 +17,7 @@
  * Style repris de la carte Enedis Linky New (content-card-linky-new), du même auteur.
  */
 
-const CARD_VERSION = "1.2.0-beta.1";
+const CARD_VERSION = "1.2.0-beta.2";
 
 /* ------------------------------------------------------------- affichage */
 
@@ -1560,9 +1560,24 @@ const DIAG = {
   },
 
   /** Contrôles : statut ok | warn | bad | info (moteur en chauffe), ou null sans données. */
-  checks(v, num) {
-    const r = v.roles, rpm = num(r.rpm);
-    const running = rpm !== null && rpm > 300;
+  /** Sondes lambda sur les dernières minutes : bascules riche / pauvre de l'amont et de l'aval (hystérésis 0,3–0,6 V).
+   *  Un catalyseur efficace lisse l'aval : il bascule bien moins que l'amont. Les coupures d'injection
+   *  (décélération : les deux sondes sous 0,2 V) sont ignorées. rows : [[t, amont, aval], ...] dans l'ordre. */
+  lambda(rows) {
+    const keep = rows.filter(([, a, b]) => a !== null && b !== null && !(a < 0.2 && b < 0.2));
+    const flips = (i) => { let st = null, n = 0; for (const x of keep) { const v = x[i]; const s2 = v > 0.6 ? 1 : v < 0.3 ? 0 : st; if (st !== null && s2 !== st) n++; st = s2; } return n; };
+    const up = flips(1), down = flips(2);
+    const mean = keep.length ? keep.reduce((t, x) => t + x[2], 0) / keep.length : null;
+    let status = null;
+    if (keep.length >= 30 && up >= 6) { const ratio = down / up; status = ratio <= 0.6 ? "ok" : ratio >= 0.8 && up >= 10 ? "warn" : null; }
+    return { n: keep.length, up, down, mean, status };
+  },
+
+  checks(v, num, connected = null, lam = null) {
+    const r = v.roles, rpm0 = num(r.rpm);
+    // Torque déconnecté : les valeurs sont figées (voiture garée), le moteur n'est pas jugé tournant
+    const running = connected !== false && rpm0 !== null && rpm0 > 300;
+    const rpm = rpm0;
     const out = {};
     const coolant = num(r.coolant), oil = num(r.oil);
     const warm = coolant !== null ? coolant >= 80 : null;
@@ -1574,7 +1589,8 @@ const DIAG = {
       out.trim = !running ? null : l <= 10 && t <= 15 ? "ok" : l <= 20 && t <= 25 ? "warn" : "bad";
     }
     const down = num(r.o2_down);
-    if (down !== null) out.o2 = !running || warm === false ? null : down >= 0.4 && down <= 1 ? "ok" : "warn";
+    // jamais sur une valeur isolée : seulement sur les dernières minutes de route, moteur chaud
+    if (down !== null) out.o2 = running && warm !== false && lam ? lam.status : null;
     const bat = num(r.battery) ?? num(r.adapter);
     if (bat !== null) out.battery = running ? (bat >= 13.2 && bat <= 14.8 ? "ok" : bat >= 12.8 && bat <= 15.2 ? "warn" : "bad")
       : (bat >= 12.4 ? "ok" : bat >= 12 ? "warn" : "bad");
@@ -1639,6 +1655,33 @@ class BudgetCarburantDiagnosticCard extends HTMLElement {
   }
   _unit(id, d = "") { return this._st(id)?.attributes?.unit_of_measurement ?? d; }
 
+  /** Historique des deux sondes lambda sur 15 min, relu toutes les 2 min en roulant. */
+  async _loadLambda(v) {
+    const h = this._hass, a = v.roles.o2_up, b = v.roles.o2_down;
+    if (!h?.callApi || this._lamBusy || (this._lam?.veh === v.id && Date.now() - this._lam.at < 120e3)) return;
+    this._lamBusy = true;
+    try {
+      const end = new Date(), start = new Date(end.getTime() - 15 * 60e3);
+      const rows = await h.callApi("GET", `history/period/${encodeURIComponent(start.toISOString())}?filter_entity_id=${encodeURIComponent(`${a},${b}`)}` +
+        `&end_time=${encodeURIComponent(end.toISOString())}&minimal_response&no_attributes&significant_changes_only=0`);
+      const series = {};
+      for (const list of rows || []) {
+        const id = list?.[0]?.entity_id;
+        if (id) series[id] = list.map((x) => [new Date(x.last_changed || x.last_updated).getTime(), Number(x.state)]).filter(([t, n]) => Number.isFinite(t) && Number.isFinite(n));
+      }
+      // fusion des deux séries dans l'ordre du temps, chaque sonde gardant sa dernière valeur
+      const ev = [...(series[a] || []).map(([t, n]) => [t, 1, n]), ...(series[b] || []).map(([t, n]) => [t, 2, n])].sort((x, y) => x[0] - y[0]);
+      const cur = [null, null, null], merged = [];
+      for (const [t, i, n] of ev) { cur[i] = n; merged.push([t, cur[1], cur[2]]); }
+      this._lam = { veh: v.id, at: Date.now(), res: DIAG.lambda(merged) };
+    } catch (err) {
+      this._lam = { veh: v.id, at: Date.now(), res: null };
+    }
+    this._lamBusy = false;
+    this._sig = null;
+    this._render();
+  }
+
   _render() {
     if (!this._config || !this._hass || !this.shadowRoot) return;
     const c = this._config;
@@ -1658,7 +1701,11 @@ class BudgetCarburantDiagnosticCard extends HTMLElement {
       return;
     }
     const r = v.roles, num = (id) => this._num(id);
-    const { out, running, rpm, bat, warm } = DIAG.checks(v, num);
+    const linkSt0 = this._st(v.link);
+    const conn0 = linkSt0 ? linkSt0.state === "on" : null;
+    const lam = this._lam?.veh === v.id && Date.now() - this._lam.at < 5 * 60e3 ? this._lam.res : null;
+    const { out, running, rpm, bat, warm } = DIAG.checks(v, num, conn0, lam);
+    if (running && r.o2_up && r.o2_down) this._loadLambda(v);
     const f = (id, d = 1) => fmt(num(id), d);
     const u = (id, d) => esc(this._unit(id, d));
     const tile = (id, label, value, unit, status, note = "", extra = "") => (id || extra ? `<div class="dg-t ${status || ""}"${id ? ` data-entity="${esc(id)}"` : ""}>
@@ -1673,14 +1720,12 @@ class BudgetCarburantDiagnosticCard extends HTMLElement {
     const nOk = st.filter((x) => x === "ok" || x === "info").length, nWarn = st.filter((x) => x === "warn").length, nBad = st.filter((x) => x === "bad").length;
     const linkSt = this._st(v.link);
     const connected = linkSt ? linkSt.state === "on" : null;
-    const lastIso = linkSt?.last_changed;
-    const when = lastIso ? new Date(lastIso).toLocaleString("fr-FR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : null;
     const mil = num(r.mil_km);
     const [vCls, vIcon, vTitle] = !running ? ["off", "mdi:engine-off-outline", "Moteur arrêté"] : nBad ? ["bad", "mdi:alert-circle", "À vérifier"] : nWarn ? ["warn", "mdi:alert", "À surveiller"] : ["ok", "mdi:check-circle", "Rien à signaler"];
     const parts = [nOk ? `${nOk} contrôle${nOk > 1 ? "s" : ""} OK` : "", nWarn ? `${nWarn} à surveiller` : "", nBad ? `${nBad} à vérifier` : "",
       mil !== null ? (mil > 0 ? `${fmt(mil, 0)} km parcourus voyant moteur allumé` : "voyant moteur éteint") : ""].filter(Boolean);
     const verdict = `<div class="dg-verdict ${vCls}"><ha-icon icon="${vIcon}"></ha-icon><div><b>${vTitle}</b>
-      <span>${running ? parts.join(" · ") : `Dernières valeurs connues${when ? ` · ${connected === false ? "déconnecté depuis" : "le"} ${when}` : ""}. La batterie est jugée au repos.`}</span></div></div>`;
+      <span>${running ? parts.join(" · ") : `${connected === false ? "Torque déconnecté · " : ""}dernières valeurs connues, figées depuis l'arrêt. La batterie est jugée au repos ; les sondes et le ralenti ne sont pas jugés.`}</span></div></div>`;
 
     // --- voyants
     const led = (status, label, id) => (status ? `<span class="dg-led ${status}"${id ? ` data-entity="${esc(id)}"` : ""}><i></i>${label}</span>` : "");
@@ -1698,7 +1743,12 @@ class BudgetCarburantDiagnosticCard extends HTMLElement {
     const ltft = num(r.ltft), stft = num(r.stft);
     const trimTile = ltft !== null || stft !== null ? tile(r.ltft || r.stft, "Corrections carburant", fmt((ltft ?? 0) + (stft ?? 0), 1), "% total", out.trim,
       "OK entre −10 et +10 % · au-delà : prise d'air, injecteurs, débitmètre", kv("Court terme", r.stft, "%") + kv("Long terme", r.ltft, "%") + kv("Banc 2 long terme", r.ltft2, "%")) : "";
-    const o2Tile = r.o2_up || r.o2_down ? tile(r.o2_down || r.o2_up, "Sondes lambda", null, "", out.o2, "aval stable vers 0,6–0,8 V = catalyseur efficace",
+    const o2Note = !running ? "jugées seulement en roulant, moteur chaud"
+      : warm === false ? "jugées une fois le moteur chaud"
+      : !lam || lam.status === null ? (lam && lam.n >= 30 && lam.up >= 6 ? `amont ${lam.up} bascules, aval ${lam.down} sur 15 min : pas de conclusion` : "analyse en cours : quelques minutes de route moteur chaud")
+      : lam.status === "ok" ? `aval stable (amont ${lam.up} bascules, aval ${lam.down} sur 15 min) : catalyseur efficace`
+      : `l'aval suit l'amont (${lam.down} bascules pour ${lam.up}) : catalyseur ou sonde aval à faire vérifier`;
+    const o2Tile = r.o2_up || r.o2_down ? tile(r.o2_down || r.o2_up, "Sondes lambda", null, "", out.o2, o2Note,
       kv("Amont", r.o2_up, "V", 2) + kv("Aval", r.o2_down, "V", 2)) : "";
     const cyl = (list, fmtv, warnAt) => `<div class="dg-cyl">${list.map((x) => { const n = num(x.id); return `<div class="dg-c${n !== null && Math.abs(n) >= warnAt ? " warn" : ""}" data-entity="${esc(x.id)}">Cyl ${x.cyl}<b>${n === null ? "—" : fmtv(n)}</b></div>`; }).join("")}</div>`;
     const misTot = v.misfire.reduce((a, m) => a + (num(m.id) ?? 0), 0);
@@ -1736,7 +1786,7 @@ class BudgetCarburantDiagnosticCard extends HTMLElement {
     ]) : "";
 
     const tabs = list.length > 1 ? `<div class="dg-tabs">${list.map((x) => `<button data-veh="${esc(x.id)}" class="${x.id === v.id ? "on" : ""}">${esc(x.name)}</button>`).join("")}</div>` : "";
-    const subTxt = running ? `moteur tournant · ${fmt(rpm, 0)} tr/min` : "moteur arrêté";
+    const subTxt = running ? `moteur tournant · ${fmt(rpm, 0)} tr/min` : connected === false ? "Torque déconnecté · moteur arrêté" : "moteur arrêté";
     this.shadowRoot.innerHTML = `${head}<ha-card class="${theme}"${hcHpStyle(c)}>
       <header><div class="brand"><ha-icon class="dg-ico" icon="mdi:engine-outline"></ha-icon><div><div class="title">${esc(c.title || DIAG_DEFAULTS.title)}</div>
         <div class="sub">${esc(v.name)} · ${subTxt}</div></div></div>${leds ? `<div class="dg-leds">${leds}</div>` : ""}</header>
