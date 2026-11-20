@@ -98,7 +98,8 @@ Sans fichier à copier ni redémarrage, avec un compte administrateur :
    « Plein de carburant (tag NFC) » et la page « Plein » (`/plein-carburant/choix`), et affiche
    chaque étape.
 4. Écrivez un tag NFC par voiture avec l'application Home Assistant (**Paramètres › Tags › Ajouter
-   un tag**), avec l'identifiant indiqué pour la voiture.
+   un tag**), avec l'identifiant indiqué pour la voiture, ou imprimez un QR code à la place
+   (voir [Sans NFC : un QR code](#sans-nfc--un-qr-code)).
 
 Pour ajouter une voiture plus tard, ajoutez-la dans l'éditeur et relancez l'installation : les
 entrées et les pleins déjà notés sont gardés ; les scripts, l'automatisation et la page sont
@@ -129,10 +130,41 @@ des cartes de Home Assistant.
    [maison-chips-card](https://github.com/Marlboro62/maison-ha-cards).
 6. Écrivez un tag NFC par voiture avec l'application Home Assistant (**Paramètres › Tags › Ajouter
    un tag**) en lui donnant l'identifiant du package (`Plein Citadine`, `Plein SUV`…), et collez-le
-   dans la voiture.
+   dans la voiture, ou imprimez un QR code à la place (voir ci-dessous).
 
 L'ouverture automatique de la page au bip utilise `command_webview` de l'application Android.
 Sur iPhone, touchez la notification pour ouvrir la page.
+
+## Sans NFC : un QR code
+
+Un téléphone sans NFC, ou un QR code collé dans la trappe à carburant, fait le même travail : Home
+Assistant traite un QR code de tag comme un bip NFC. L'automatisation et la page « Plein » restent
+les mêmes.
+
+1. Dans **Paramètres › Tags**, touchez **Ajouter un tag**. Donnez-lui un nom, et comme identifiant
+   un texte **sans espace ni accent**, par exemple `plein-citadine` (une espace dans l'adresse du QR
+   code peut empêcher la lecture).
+2. Ajoutez cet identifiant aux tags de la voiture :
+   - installation depuis la carte : dans l'éditeur, champ **Tags** de la voiture, séparé du tag NFC
+     par une virgule (`Plein Citadine, plein-citadine`), puis **Installer ou mettre à jour** ;
+   - installation en YAML : un déclencheur de plus dans l'automatisation, avec le même `id` que la
+     voiture :
+
+     ```yaml
+     - trigger: tag
+       tag_id: plein-citadine
+       id: citadine
+     ```
+
+3. Ouvrez le tag dans **Paramètres › Tags** : la fenêtre affiche son QR code, avec un bouton pour
+   l'imprimer. Collez-le dans la trappe à carburant (une étiquette plastifiée résiste mieux à
+   l'essence et à la pluie).
+4. Au plein, flashez le QR code avec l'appareil photo du téléphone, ou avec le lecteur de QR code de
+   l'application Home Assistant : le lien ouvre l'application, qui signale le tag, et la page
+   « Plein » s'ouvre comme avec le NFC.
+
+Le téléphone qui flashe doit avoir l'application Home Assistant connectée à votre installation : un
+autre téléphone ouvre seulement une page du site home-assistant.io, sans noter de plein.
 
 ## La carte
 

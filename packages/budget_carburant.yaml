@@ -194,6 +194,9 @@ automation:
     triggers:
       # À ADAPTER : un déclencheur par voiture ; l'id est le nom court utilisé dans les entrées
       # (plein_<id>_dernier, plein_<id>_depense_totale…)
+      # Sans NFC : un tag imprimé en QR code (Paramètres › Tags) se déclenche de la même façon ;
+      # lui donner un identifiant sans espace (plein-citadine) et ajouter ici un déclencheur
+      # avec le même id que la voiture.
       - trigger: tag
         tag_id: Plein Citadine
         id: citadine
