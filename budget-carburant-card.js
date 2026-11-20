@@ -17,7 +17,7 @@
  * Style repris de la carte Enedis Linky New (content-card-linky-new), du même auteur.
  */
 
-const CARD_VERSION = "1.2.0-beta.2";
+const CARD_VERSION = "1.2.0-beta.3";
 
 /* ------------------------------------------------------------- affichage */
 
@@ -1600,6 +1600,11 @@ const DIAG = {
     if (v.knock.length) { const mx = Math.max(...kn); out.knock = mx === 0 ? "ok" : mx <= 3 ? "warn" : "bad"; }
     const mil = num(r.mil_km);
     if (mil !== null) out.mil = mil > 0 ? "bad" : "ok";
+    // Torque déconnecté : valeurs figées depuis l'arrêt, seul le voyant moteur (mémorisé par le calculateur) reste jugé
+    if (connected === false) {
+      for (const k of Object.keys(out)) if (k !== "mil") delete out[k];
+      return { out, running, rpm, bat, warm };
+    }
     const target = num(r.idle_target), speed = num(r.speed);
     if (target !== null && running && (speed === null || speed < 1)) { const d = Math.abs(rpm - target); out.idle = d <= 100 ? "ok" : d <= 200 ? "warn" : "bad"; }
     return { out, running, rpm, bat, warm };
@@ -1725,7 +1730,8 @@ class BudgetCarburantDiagnosticCard extends HTMLElement {
     const parts = [nOk ? `${nOk} contrôle${nOk > 1 ? "s" : ""} OK` : "", nWarn ? `${nWarn} à surveiller` : "", nBad ? `${nBad} à vérifier` : "",
       mil !== null ? (mil > 0 ? `${fmt(mil, 0)} km parcourus voyant moteur allumé` : "voyant moteur éteint") : ""].filter(Boolean);
     const verdict = `<div class="dg-verdict ${vCls}"><ha-icon icon="${vIcon}"></ha-icon><div><b>${vTitle}</b>
-      <span>${running ? parts.join(" · ") : `${connected === false ? "Torque déconnecté · " : ""}dernières valeurs connues, figées depuis l'arrêt. La batterie est jugée au repos ; les sondes et le ralenti ne sont pas jugés.`}</span></div></div>`;
+      <span>${running ? parts.join(" · ") : (connected === false ? "Torque déconnecté · dernières valeurs connues, figées depuis l'arrêt : elles ne sont pas jugées. Seul le voyant moteur reste suivi."
+        : "Contact mis, moteur arrêté : la batterie est jugée au repos ; les sondes et le ralenti ne sont pas jugés.")}</span></div></div>`;
 
     // --- voyants
     const led = (status, label, id) => (status ? `<span class="dg-led ${status}"${id ? ` data-entity="${esc(id)}"` : ""}><i></i>${label}</span>` : "");
@@ -1752,14 +1758,14 @@ class BudgetCarburantDiagnosticCard extends HTMLElement {
       kv("Amont", r.o2_up, "V", 2) + kv("Aval", r.o2_down, "V", 2)) : "";
     const cyl = (list, fmtv, warnAt) => `<div class="dg-cyl">${list.map((x) => { const n = num(x.id); return `<div class="dg-c${n !== null && Math.abs(n) >= warnAt ? " warn" : ""}" data-entity="${esc(x.id)}">Cyl ${x.cyl}<b>${n === null ? "—" : fmtv(n)}</b></div>`; }).join("")}</div>`;
     const misTot = v.misfire.reduce((a, m) => a + (num(m.id) ?? 0), 0);
-    const misTile = v.misfire.length ? tile(null, "Ratés d'allumage", null, "", out.misfire, misTot === 0 ? "aucun raté" : misTot <= 5 ? "ratés isolés : à surveiller s'ils se répètent" : "ratés répétés : bougies, bobines, injecteurs", cyl(v.misfire, (n) => fmt(n, 0), 1)) : "";
+    const misTile = v.misfire.length ? tile(null, "Ratés d'allumage", null, "", out.misfire, !out.misfire ? "dernières valeurs reçues" : misTot === 0 ? "aucun raté" : misTot <= 5 ? "ratés isolés : à surveiller s'ils se répètent" : "ratés répétés : bougies, bobines, injecteurs", cyl(v.misfire, (n) => fmt(n, 0), 1)) : "";
     const knTile = v.knock.length ? tile(null, "Cliquetis", null, "", out.knock, "retrait d'avance par cylindre", cyl(v.knock, (n) => `${fmt(n, 1)}°`, 0.1)) : "";
     const combustion = grid([trimTile, o2Tile], "dg-g2") + grid([misTile, knTile], "dg-g2");
 
     // --- électricité et huile
     const idleTarget = num(r.idle_target);
     const elec = grid([
-      bat !== null ? tile(r.battery || r.adapter, "Batterie", fmt(bat, 1), "V", out.battery, running ? "moteur tournant : 13,2–14,8 V" : "au repos : 12,4 V ou plus") : "",
+      bat !== null ? tile(r.battery || r.adapter, "Batterie", fmt(bat, 1), "V", out.battery, connected === false ? "dernière valeur reçue" : running ? "moteur tournant : 13,2–14,8 V" : "au repos : 12,4 V ou plus") : "",
       r.oil_quality && num(r.oil_quality) !== null ? tile(r.oil_quality, "Qualité huile", f(r.oil_quality, 2), u(r.oil_quality), null, "capteur d'huile du moteur") : "",
       r.oil_level && num(r.oil_level) ? tile(r.oil_level, "Niveau huile", f(r.oil_level, 1), u(r.oil_level), null) : "",
       running && idleTarget !== null ? tile(r.rpm, "Ralenti", fmt(rpm, 0), "tr/min", out.idle, `consigne ${fmt(idleTarget, 0)}${r.irregular && num(r.irregular) !== null ? ` · irrégularité ${f(r.irregular, 0)}` : ""}`) : "",
