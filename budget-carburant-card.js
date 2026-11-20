@@ -1311,7 +1311,7 @@ const CAR_SCHEMA = [
 ];
 const CAR_LABELS = {
   name: "Nom de la voiture",
-  tags: "Tags NFC (séparés par des virgules ; vide : « Plein <nom> »)",
+  tags: "Tags NFC ou QR code (séparés par des virgules ; vide : « Plein <nom> »)",
   odometer: "Compteur kilométrique (facultatif : pré-remplit le kilométrage)",
 };
 const INSTALL_LABELS = {
@@ -1375,7 +1375,8 @@ class BudgetCarburantCardEditor extends makeEditor(SCHEMA, LABELS, PLEINS_DEFAUL
       this._inst.innerHTML = `${INSTALL_STYLE}<h3>Installation du suivi des pleins</h3>
         <p>Crée dans Home Assistant les entrées, les scripts, l'automatisation du tag NFC et la page « Plein »
         (adresse /${PAGE_URL}/choix). À relancer après avoir ajouté une voiture : les pleins déjà notés sont gardés.
-        Les tags s'écrivent avec l'application (Paramètres › Tags).</p>
+        Les tags s'écrivent avec l'application (Paramètres › Tags). Sans NFC, un tag peut aussi s'imprimer
+        en QR code depuis Paramètres › Tags : donnez-lui un identifiant sans espace (plein-citadine) et ajoutez-le aux tags de la voiture.</p>
         <div class="bc-cars"></div>
         <div class="bc-row"><button type="button" class="bc-add">Ajouter une voiture</button>
           <button type="button" class="bc-take" hidden>Reprendre l'installation en place</button></div>
