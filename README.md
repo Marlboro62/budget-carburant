@@ -55,7 +55,7 @@ jour se remplit), on tape les litres et le kilométrage, puis « Enregistrer le 
 
 | Fichier | Rôle |
 | --- | --- |
-| `budget-carburant-card.js` | la carte `custom:budget-carburant-card`, qui peut installer tout le suivi depuis son éditeur |
+| `budget-carburant-card.js` | les cartes `custom:budget-carburant-card` (qui peut installer tout le suivi depuis son éditeur) et `custom:budget-carburant-diagnostic-card` (*bêta*) |
 | `packages/budget_carburant.yaml` | les entrées, les scripts et l'automatisation du tag NFC (package Home Assistant) |
 | `docs/page-plein.yaml` | la page « Plein » que le téléphone ouvre au bip du tag |
 
@@ -182,6 +182,45 @@ Description : 42.5 L · E85 · 0.869 €/L · 36.93 € · 162000 km
 ```
 
 Vous pouvez donc aussi ajouter ou corriger un plein à la main dans le calendrier.
+
+## Carte Diagnostic moteur (Torque) *(bêta)*
+
+`custom:budget-carburant-diagnostic-card` montre la santé du moteur de chaque véhicule suivi par
+l'intégration [Torque OBD-II](https://github.com/Marlboro62/home-assistant-torque-obdii-2027), avec Torque Pro sur le téléphone.
+
+```yaml
+type: custom:budget-carburant-diagnostic-card
+```
+
+- **Un onglet par véhicule**, trouvé tout seul. Option `vehicle` pour n'en afficher qu'un.
+- **Verdict** en haut : « Rien à signaler », « À surveiller » ou « À vérifier », d'après les contrôles ci-dessous.
+  Moteur arrêté : la carte affiche les dernières valeurs connues.
+- **Voyants** : voyant moteur, batterie, moteur en chauffe, Torque connecté ou non.
+- **Températures** : liquide de refroidissement et huile (en bleu sous 80 °C, moteur en chauffe : ce n'est pas une alerte),
+  air d'admission et catalyseur.
+- **Mélange et combustion** : corrections carburant à court et long terme (OK entre −10 et +10 %), sondes lambda amont
+  et aval, ratés d'allumage et retrait d'avance anti-cliquetis **cylindre par cylindre** quand le véhicule les fournit.
+- **Électricité et huile** : tension de la batterie (13,2 à 14,8 V moteur tournant, 12,4 V ou plus au repos), qualité
+  et niveau d'huile, régime de ralenti par rapport à sa consigne, distance depuis l'effacement des codes.
+- **Moteur en direct** (`show_live`) : charge, papillon, avance, débit d'air, pression du collecteur, temps d'injection.
+- **Trajet** (`show_trip`) : distance, durée, part au ralenti, consommation moyenne.
+- Un clic sur une tuile ouvre l'historique du capteur.
+
+Les capteurs sont reconnus par leur code PID (attribut `pid` des capteurs Torque), et les PID constructeur par leur nom
+(« Ratés cylindre 1 », « Retrait cliquetis cyl 1 », « Qualité huile », « Tension batterie »…). Seules les tuiles dont le
+véhicule envoie les données s'affichent.
+
+Torque n'envoie pas les codes défaut (DTC) à Home Assistant : la carte signale le voyant moteur par la distance
+parcourue voyant allumé, et la distance depuis le dernier effacement des codes.
+
+| Option | Défaut | Rôle |
+| --- | --- | --- |
+| `title` | `Diagnostic moteur` | titre de la carte |
+| `vehicle` | | véhicule affiché (appareil Torque) ; vide : un onglet par véhicule |
+| `show_live` | `true` | section Moteur en direct |
+| `show_trip` | `true` | section Trajet |
+| `theme` | `v2` | `v2` bleu nuit, `auto` bleu nuit ou clair selon Home Assistant, `ha` thème Home Assistant |
+| `font_size` | `100` | taille du texte en % |
 
 ## Support
 

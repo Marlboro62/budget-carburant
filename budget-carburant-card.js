@@ -11,10 +11,13 @@
  * type: custom:budget-carburant-card
  * calendar: calendar.home
  *
+ * Carte « Diagnostic moteur » (custom:budget-carburant-diagnostic-card) : santé du moteur de chaque véhicule
+ * de l'intégration Torque OBD-II (températures, mélange, ratés, cliquetis, batterie, voyant moteur).
+ *
  * Style repris de la carte Enedis Linky New (content-card-linky-new), du même auteur.
  */
 
-const CARD_VERSION = "1.1.0";
+const CARD_VERSION = "1.2.0-beta.1";
 
 /* ------------------------------------------------------------- affichage */
 
@@ -1470,12 +1473,346 @@ class BudgetCarburantCardEditor extends makeEditor(SCHEMA, LABELS, PLEINS_DEFAUL
   }
 }
 
+/* ------------------------------------------------------ diagnostic moteur (Torque) */
+
+/** Carte « Diagnostic moteur » : santé du moteur de chaque véhicule suivi par l'intégration Torque OBD-II
+ *  (torque_obd). Les capteurs sont reconnus par leur code PID (attribut « pid », ex. « kc » = régime),
+ *  et les PID constructeur (ratés et cliquetis par cylindre, qualité d'huile…) par leur nom.
+ *
+ * type: custom:budget-carburant-diagnostic-card
+ */
+const DIAG_DEFAULTS = { title: "Diagnostic moteur", vehicle: "", show_live: true, show_trip: true, theme: "v2", font_size: 100 };
+
+/** « kc » → « k0c » (même règle que l'intégration) ; un PID constructeur (« k2101_slkrate0 ») est gardé tel quel. */
+const normPid = (pid) => {
+  const p = String(pid || "").toLowerCase();
+  if (!/^k[0-9a-f]+$/.test(p)) return p;
+  const h = p.slice(1);
+  return h.length < 2 ? `k${h.padStart(2, "0")}` : p;
+};
+/** Nom sans accents ni majuscules, pour reconnaître les PID constructeur. */
+const plain = (t) => String(t || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+
+/** Rôles : codes PID standard, sinon motif du nom (PID constructeur). Le premier trouvé l'emporte. */
+const DIAG_ROLES = [
+  ["coolant", ["k05", "k67"], /temp\w*\s+(du\s+)?liquide\s+(de\s+)?refroid|coolant/],
+  ["oil", ["k5c"], /temp\w*\s+(d'?\s*)?huile|oil\s+temp/],
+  ["iat", ["k0f", "k68"], /temp\w*\s+(d'?\s*)?air\s+(d'?\s*)?admission/],
+  ["cat", ["k3c"], /catalyseur/],
+  ["rpm", ["k0c"], /regime\s+moteur$/],
+  ["idle_target", [], /(consigne\s+(de\s+)?ralenti|ralenti\s+consigne)/],
+  ["speed", ["k0d"], /^vitesse$/],
+  ["load", ["k04"], /charge\s+moteur$/],
+  ["throttle", ["k11"], /(angle\s+)?papillon|position\s+des\s+gaz$/],
+  ["advance", ["k0e"], /avance\s+(a\s+l'?)?allumage$/],
+  ["advance_base", [], /avance\s+allumage\s+base/],
+  ["maf", ["k10", "k66"], /debit\s+(massique\s+d'?)?air/],
+  ["map", ["k0b"], /pression\s+(du\s+)?collecteur(\s+d'?admission)?$/],
+  ["inj", [], /temps\s+(d'?)?injection/],
+  ["stft", ["k06"], null], ["ltft", ["k07"], null], ["stft2", ["k08"], null], ["ltft2", ["k09"], null],
+  ["o2_up", ["kff1214"], /sonde\s+o2\s+amont/],
+  ["o2_down", ["kff1215"], /sonde\s+o2\s+aval/],
+  ["battery", ["k42"], /tension\s+(de\s+la\s+)?batterie/],
+  ["adapter", ["kff1238"], null],
+  ["mil_km", ["k21"], null],
+  ["clear_km", ["k31"], null],
+  ["oil_quality", [], /qualite\s+(d'?)?huile/],
+  ["oil_level", [], /niveau\s+(d'?)?huile/],
+  ["irregular", [], /irregularite/],
+  ["trip_km", ["kff1204"], null],
+  ["trip_time", ["kff1266"], null],
+  ["trip_idle", ["kff1298"], null],
+  ["trip_l100", ["kff1208", "kff5203"], null],
+];
+
+const DIAG = {
+  /** Véhicules de l'intégration torque_obd : { id, name, roles: {rôle: entité}, misfire: [], knock: [], link }. */
+  vehicles(hass) {
+    const reg = hass?.entities || {}, devs = hass?.devices || {}, st = hass?.states || {};
+    const byDev = {};
+    for (const [id, e] of Object.entries(reg)) if (e.platform === "torque_obd" && st[id] && e.device_id) (byDev[e.device_id] ||= []).push(id);
+    return Object.entries(byDev).map(([d, ids]) => {
+      const dev = devs[d] || {};
+      const name = dev.name_by_user || dev.name || "Véhicule";
+      const devName = plain(dev.name || "");
+      const short = (id) => plain(st[id]?.attributes?.friendly_name || id).replace(devName, "").replace(/^[\s-]+|[\s-]+$/g, "").replace(/^.*\s-\s/, "");
+      const roles = {}, misfire = [], knock = [];
+      const sensors = ids.filter((id) => id.startsWith("sensor."));
+      for (const [role, pids, re] of DIAG_ROLES) {
+        let hit = pids.map((p) => sensors.find((id) => normPid(st[id].attributes?.pid) === p)).find(Boolean);
+        // PID constructeur d'abord quand il existe sous ce nom (souvent plus juste que le PID générique)
+        const custom = re ? sensors.find((id) => !/^k[0-9a-f]+$/.test(String(st[id].attributes?.pid || "").toLowerCase()) && re.test(short(id))) : null;
+        if (custom && ["battery", "o2_up", "o2_down", "coolant", "oil", "idle_target", "inj"].includes(role)) hit = custom;
+        roles[role] = hit || custom || (re ? sensors.find((id) => re.test(short(id))) : null) || null;
+      }
+      for (const id of sensors) {
+        const n = short(id);
+        let m = /rat[eé]s?\s+(d'?allumage\s+)?(cyl\w*)\s*(\d+)/.exec(n);
+        if (m) misfire.push({ id, cyl: Number(m[3]) });
+        m = /cliquetis\s+(cyl\w*)\s*(\d+)/.exec(n);
+        if (m) knock.push({ id, cyl: Number(m[2]) });
+      }
+      misfire.sort((a, b) => a.cyl - b.cyl); knock.sort((a, b) => a.cyl - b.cyl);
+      const link = ids.find((id) => id.startsWith("binary_sensor.") && st[id].attributes?.device_class === "connectivity") || null;
+      return { id: d, name, roles, misfire, knock, link };
+    }).sort((a, b) => a.name.localeCompare(b.name, "fr"));
+  },
+
+  /** Contrôles : statut ok | warn | bad | info (moteur en chauffe), ou null sans données. */
+  checks(v, num) {
+    const r = v.roles, rpm = num(r.rpm);
+    const running = rpm !== null && rpm > 300;
+    const out = {};
+    const coolant = num(r.coolant), oil = num(r.oil);
+    const warm = coolant !== null ? coolant >= 80 : null;
+    if (coolant !== null) out.coolant = !running ? null : coolant < 80 ? "info" : coolant <= 105 ? "ok" : coolant <= 112 ? "warn" : "bad";
+    if (oil !== null) out.oil = !running ? null : oil < 80 ? "info" : oil <= 125 ? "ok" : oil <= 135 ? "warn" : "bad";
+    const ltft = num(r.ltft), stft = num(r.stft);
+    if (ltft !== null || stft !== null) {
+      const l = Math.abs(ltft ?? 0), t = Math.abs((ltft ?? 0) + (stft ?? 0));
+      out.trim = !running ? null : l <= 10 && t <= 15 ? "ok" : l <= 20 && t <= 25 ? "warn" : "bad";
+    }
+    const down = num(r.o2_down);
+    if (down !== null) out.o2 = !running || warm === false ? null : down >= 0.4 && down <= 1 ? "ok" : "warn";
+    const bat = num(r.battery) ?? num(r.adapter);
+    if (bat !== null) out.battery = running ? (bat >= 13.2 && bat <= 14.8 ? "ok" : bat >= 12.8 && bat <= 15.2 ? "warn" : "bad")
+      : (bat >= 12.4 ? "ok" : bat >= 12 ? "warn" : "bad");
+    const mis = v.misfire.map((m) => num(m.id) ?? 0);
+    if (v.misfire.length) { const tot = mis.reduce((a, b) => a + b, 0); out.misfire = tot === 0 ? "ok" : tot <= 5 ? "warn" : "bad"; }
+    const kn = v.knock.map((k) => Math.abs(num(k.id) ?? 0));
+    if (v.knock.length) { const mx = Math.max(...kn); out.knock = mx === 0 ? "ok" : mx <= 3 ? "warn" : "bad"; }
+    const mil = num(r.mil_km);
+    if (mil !== null) out.mil = mil > 0 ? "bad" : "ok";
+    const target = num(r.idle_target), speed = num(r.speed);
+    if (target !== null && running && (speed === null || speed < 1)) { const d = Math.abs(rpm - target); out.idle = d <= 100 ? "ok" : d <= 200 ? "warn" : "bad"; }
+    return { out, running, rpm, bat, warm };
+  },
+};
+
+const DIAG_LABEL = { ok: "OK", warn: "À surveiller", bad: "À vérifier", info: "Chauffe" };
+
+class BudgetCarburantDiagnosticCard extends HTMLElement {
+  static getConfigElement() {
+    return document.createElement("budget-carburant-diagnostic-card-editor");
+  }
+
+  static getStubConfig() {
+    return {};
+  }
+
+  setConfig(config) {
+    this._config = { ...DIAG_DEFAULTS, ...(config || {}) };
+    this._sig = null;
+    if (!this.shadowRoot) {
+      this.attachShadow({ mode: "open" });
+      this.shadowRoot.addEventListener("click", (ev) => {
+        const t = ev.target.closest?.("[data-veh]");
+        if (t) { this._veh = t.dataset.veh; this._sig = null; this._render(); return; }
+        const el = ev.target.closest?.("[data-entity]");
+        if (el?.dataset.entity) {
+          const e = new Event("hass-more-info", { bubbles: true, composed: true });
+          e.detail = { entityId: el.dataset.entity };
+          this.dispatchEvent(e);
+        }
+      });
+    }
+    this._render();
+  }
+
+  set hass(hass) {
+    if (this._hass?.entities !== hass.entities || this._hass?.devices !== hass.devices) this._list = null;
+    this._hass = hass;
+    this._render();
+  }
+
+  getCardSize() {
+    return 9;
+  }
+
+  _st(id) { return id ? this._hass?.states?.[id] : undefined; }
+  _num(id) {
+    const s = this._st(id);
+    if (!s || s.state === "unavailable" || s.state === "unknown" || s.state === "") return null;
+    const v = Number(s.state);
+    return Number.isFinite(v) ? v : null;
+  }
+  _unit(id, d = "") { return this._st(id)?.attributes?.unit_of_measurement ?? d; }
+
+  _render() {
+    if (!this._config || !this._hass || !this.shadowRoot) return;
+    const c = this._config;
+    this._list ||= DIAG.vehicles(this._hass);
+    const want = plain(c.vehicle);
+    const list = want ? this._list.filter((v) => v.id === c.vehicle || plain(v.name) === want) : this._list;
+    const v = list.find((x) => x.id === this._veh) || list[0];
+    const ids = v ? [...Object.values(v.roles), ...v.misfire.map((m) => m.id), ...v.knock.map((k) => k.id), v.link] : [];
+    const sig = `${c.theme}|${this._hass.themes?.darkMode}|${v?.id}|${list.length}|${Math.floor(Date.now() / 6e4)}|` + ids.map((id) => this._st(id)?.state ?? "-").join("|");
+    if (sig === this._sig) return;
+    this._sig = sig;
+    const theme = themeClass(c.theme, this._hass);
+    const head = `${STYLE}${DIAG_STYLE}`;
+    if (!v) {
+      this.shadowRoot.innerHTML = `${head}<ha-card class="${theme}"${hcHpStyle(c)}><div class="empty"><span>Aucun véhicule Torque trouvé</span>
+        <small>Installez l'intégration Torque OBD-II, ajoutez un véhicule dans Paramètres › Appareils et services, puis roulez avec Torque Pro.</small></div></ha-card>`;
+      return;
+    }
+    const r = v.roles, num = (id) => this._num(id);
+    const { out, running, rpm, bat, warm } = DIAG.checks(v, num);
+    const f = (id, d = 1) => fmt(num(id), d);
+    const u = (id, d) => esc(this._unit(id, d));
+    const tile = (id, label, value, unit, status, note = "", extra = "") => (id || extra ? `<div class="dg-t ${status || ""}"${id ? ` data-entity="${esc(id)}"` : ""}>
+      <div class="dg-tl"><span>${label}</span>${status ? `<b class="dg-${status}">${DIAG_LABEL[status]}</b>` : ""}</div>
+      ${value !== null ? `<div class="dg-v">${value}<small>${unit}</small></div>` : ""}${extra}${note ? `<div class="dg-n">${note}</div>` : ""}</div>` : "");
+    const kv = (label, id, unit = "", d = 1) => (id && num(id) !== null ? `<div class="dg-kv"><span>${label}</span><b>${f(id, d)}${unit ? ` ${unit}` : ""}</b></div>` : "");
+    const sec = (icon, title, body, right = "") => (body ? `<div class="dg-sec"><div class="dg-h"><ha-icon icon="${icon}"></ha-icon>${title}${right ? `<small>${right}</small>` : ""}</div>${body}</div>` : "");
+    const grid = (tiles, cls = "dg-g3") => { const t = tiles.filter(Boolean); return t.length ? `<div class="${cls}">${t.join("")}</div>` : ""; };
+
+    // --- verdict
+    const st = Object.values(out).filter(Boolean);
+    const nOk = st.filter((x) => x === "ok" || x === "info").length, nWarn = st.filter((x) => x === "warn").length, nBad = st.filter((x) => x === "bad").length;
+    const linkSt = this._st(v.link);
+    const connected = linkSt ? linkSt.state === "on" : null;
+    const lastIso = linkSt?.last_changed;
+    const when = lastIso ? new Date(lastIso).toLocaleString("fr-FR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : null;
+    const mil = num(r.mil_km);
+    const [vCls, vIcon, vTitle] = !running ? ["off", "mdi:engine-off-outline", "Moteur arrêté"] : nBad ? ["bad", "mdi:alert-circle", "À vérifier"] : nWarn ? ["warn", "mdi:alert", "À surveiller"] : ["ok", "mdi:check-circle", "Rien à signaler"];
+    const parts = [nOk ? `${nOk} contrôle${nOk > 1 ? "s" : ""} OK` : "", nWarn ? `${nWarn} à surveiller` : "", nBad ? `${nBad} à vérifier` : "",
+      mil !== null ? (mil > 0 ? `${fmt(mil, 0)} km parcourus voyant moteur allumé` : "voyant moteur éteint") : ""].filter(Boolean);
+    const verdict = `<div class="dg-verdict ${vCls}"><ha-icon icon="${vIcon}"></ha-icon><div><b>${vTitle}</b>
+      <span>${running ? parts.join(" · ") : `Dernières valeurs connues${when ? ` · ${connected === false ? "déconnecté depuis" : "le"} ${when}` : ""}. La batterie est jugée au repos.`}</span></div></div>`;
+
+    // --- voyants
+    const led = (status, label, id) => (status ? `<span class="dg-led ${status}"${id ? ` data-entity="${esc(id)}"` : ""}><i></i>${label}</span>` : "");
+    const leds = [led(out.mil, "Voyant moteur", r.mil_km), led(out.battery, "Batterie", r.battery || r.adapter),
+      running && warm === false ? led("info", "En chauffe", r.coolant) : "", connected === null ? "" : led(connected ? "ok" : "off", connected ? "Connecté" : "Déconnecté", v.link)].join("");
+
+    // --- températures
+    const temps = grid([
+      tile(r.coolant, "Liquide", num(r.coolant) !== null ? f(r.coolant, 0) : null, u(r.coolant, "°C"), out.coolant, "normal 80–105 °C"),
+      tile(r.oil, "Huile", num(r.oil) !== null ? f(r.oil, 0) : null, u(r.oil, "°C"), out.oil, "normal 80–125 °C"),
+      tile(r.iat, "Air admission", num(r.iat) !== null ? f(r.iat, 0) : null, u(r.iat, "°C"), null, r.cat && num(r.cat) !== null ? `catalyseur ≈ ${f(r.cat, 0)} ${u(r.cat, "°C")}` : ""),
+    ]);
+
+    // --- mélange et combustion
+    const ltft = num(r.ltft), stft = num(r.stft);
+    const trimTile = ltft !== null || stft !== null ? tile(r.ltft || r.stft, "Corrections carburant", fmt((ltft ?? 0) + (stft ?? 0), 1), "% total", out.trim,
+      "OK entre −10 et +10 % · au-delà : prise d'air, injecteurs, débitmètre", kv("Court terme", r.stft, "%") + kv("Long terme", r.ltft, "%") + kv("Banc 2 long terme", r.ltft2, "%")) : "";
+    const o2Tile = r.o2_up || r.o2_down ? tile(r.o2_down || r.o2_up, "Sondes lambda", null, "", out.o2, "aval stable vers 0,6–0,8 V = catalyseur efficace",
+      kv("Amont", r.o2_up, "V", 2) + kv("Aval", r.o2_down, "V", 2)) : "";
+    const cyl = (list, fmtv, warnAt) => `<div class="dg-cyl">${list.map((x) => { const n = num(x.id); return `<div class="dg-c${n !== null && Math.abs(n) >= warnAt ? " warn" : ""}" data-entity="${esc(x.id)}">Cyl ${x.cyl}<b>${n === null ? "—" : fmtv(n)}</b></div>`; }).join("")}</div>`;
+    const misTot = v.misfire.reduce((a, m) => a + (num(m.id) ?? 0), 0);
+    const misTile = v.misfire.length ? tile(null, "Ratés d'allumage", null, "", out.misfire, misTot === 0 ? "aucun raté" : misTot <= 5 ? "ratés isolés : à surveiller s'ils se répètent" : "ratés répétés : bougies, bobines, injecteurs", cyl(v.misfire, (n) => fmt(n, 0), 1)) : "";
+    const knTile = v.knock.length ? tile(null, "Cliquetis", null, "", out.knock, "retrait d'avance par cylindre", cyl(v.knock, (n) => `${fmt(n, 1)}°`, 0.1)) : "";
+    const combustion = grid([trimTile, o2Tile], "dg-g2") + grid([misTile, knTile], "dg-g2");
+
+    // --- électricité et huile
+    const idleTarget = num(r.idle_target);
+    const elec = grid([
+      bat !== null ? tile(r.battery || r.adapter, "Batterie", fmt(bat, 1), "V", out.battery, running ? "moteur tournant : 13,2–14,8 V" : "au repos : 12,4 V ou plus") : "",
+      r.oil_quality && num(r.oil_quality) !== null ? tile(r.oil_quality, "Qualité huile", f(r.oil_quality, 2), u(r.oil_quality), null, "capteur d'huile du moteur") : "",
+      r.oil_level && num(r.oil_level) ? tile(r.oil_level, "Niveau huile", f(r.oil_level, 1), u(r.oil_level), null) : "",
+      running && idleTarget !== null ? tile(r.rpm, "Ralenti", fmt(rpm, 0), "tr/min", out.idle, `consigne ${fmt(idleTarget, 0)}${r.irregular && num(r.irregular) !== null ? ` · irrégularité ${f(r.irregular, 0)}` : ""}`) : "",
+      r.clear_km && num(r.clear_km) !== null ? tile(r.clear_km, "Depuis l'effacement des codes", f(r.clear_km, 0), u(r.clear_km, "km"), null) : "",
+    ]);
+
+    // --- moteur en direct
+    const live = c.show_live !== false && running ? grid([
+      tile(r.load, "Charge", num(r.load) !== null ? f(r.load, 0) : null, "%", null, "", num(r.load) !== null ? `<div class="dg-bar"><i style="width:${Math.max(0, Math.min(100, num(r.load)))}%"></i></div>` : ""),
+      tile(r.throttle, "Papillon", num(r.throttle) !== null ? f(r.throttle, 1) : null, u(r.throttle, "%")),
+      tile(r.advance, "Avance", num(r.advance) !== null ? f(r.advance, 1) : null, "°", null, r.advance_base && num(r.advance_base) !== null ? `base ${f(r.advance_base, 1)}°` : ""),
+      tile(r.maf, "Débit d'air", num(r.maf) !== null ? f(r.maf, 1) : null, u(r.maf, "g/s")),
+      tile(r.map, "Collecteur", num(r.map) !== null ? f(r.map, 0) : null, u(r.map, "kPa")),
+      tile(r.inj, "Injection", num(r.inj) !== null ? f(r.inj, 1) : null, u(r.inj, "ms")),
+    ]) : "";
+
+    // --- trajet
+    const mins = (id) => { const n = num(id); if (n === null) return null; const un = this._unit(id, "s"); return un === "h" ? n * 60 : un === "min" ? n : n / 60; };
+    const tm = mins(r.trip_time);
+    const trip = c.show_trip !== false ? grid([
+      tile(r.trip_km, "Distance", num(r.trip_km) !== null ? f(r.trip_km, 1) : null, u(r.trip_km, "km")),
+      tm !== null ? tile(r.trip_time, "Durée", tm >= 60 ? `${Math.floor(tm / 60)} h ${String(Math.round(tm % 60)).padStart(2, "0")}` : fmt(tm, 0), tm >= 60 ? "" : "min", null, r.trip_idle && num(r.trip_idle) !== null ? `${f(r.trip_idle, 0)} % au ralenti` : "") : "",
+      tile(r.trip_l100, "Conso moyenne", num(r.trip_l100) ? f(r.trip_l100, 1) : null, "L/100"),
+    ]) : "";
+
+    const tabs = list.length > 1 ? `<div class="dg-tabs">${list.map((x) => `<button data-veh="${esc(x.id)}" class="${x.id === v.id ? "on" : ""}">${esc(x.name)}</button>`).join("")}</div>` : "";
+    const subTxt = running ? `moteur tournant · ${fmt(rpm, 0)} tr/min` : "moteur arrêté";
+    this.shadowRoot.innerHTML = `${head}<ha-card class="${theme}"${hcHpStyle(c)}>
+      <header><div class="brand"><ha-icon class="dg-ico" icon="mdi:engine-outline"></ha-icon><div><div class="title">${esc(c.title || DIAG_DEFAULTS.title)}</div>
+        <div class="sub">${esc(v.name)} · ${subTxt}</div></div></div>${leds ? `<div class="dg-leds">${leds}</div>` : ""}</header>
+      ${tabs}<div class="dg-body">${verdict}
+      ${sec("mdi:thermometer", "Températures", temps, running && warm === false ? "moteur en chauffe" : "")}
+      ${sec("mdi:fire", "Mélange et combustion", combustion)}
+      ${sec("mdi:car-battery", "Électricité et huile", elec)}
+      ${sec("mdi:chart-line", "Moteur en direct", live)}
+      ${sec("mdi:map-marker-distance", "Trajet", trip)}</div>
+    </ha-card>`;
+  }
+}
+
+const DIAG_STYLE = `<style>
+.dg-ico { --mdc-icon-size: 32px; color: var(--med-accent, var(--med-blue)); }
+.dg-leds { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.dg-led { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--med-line); background: var(--med-surface); font-size: .72rem; font-weight: 600; cursor: pointer; }
+.dg-led i { width: 8px; height: 8px; border-radius: 50%; background: var(--med-down); }
+.dg-led.warn i { background: #f0a33a; } .dg-led.bad { border-color: var(--t-red); } .dg-led.bad i { background: var(--t-red); }
+.dg-led.info i { background: var(--med-blue); } .dg-led.off i { background: var(--med-muted); }
+.dg-body { padding: 4px 12px 14px; }
+.dg-tabs { display: flex; gap: 8px; padding: 0 18px 8px; flex-wrap: wrap; }
+.dg-tabs button { all: unset; cursor: pointer; padding: 6px 14px; border-radius: 999px; border: 1px solid var(--med-line);
+  background: var(--med-surface); font-size: .85rem; color: var(--med-muted); }
+.dg-tabs button.on { color: var(--med-text); border-color: var(--med-accent, var(--med-blue)); }
+.dg-verdict { display: flex; gap: 12px; align-items: center; padding: 12px 14px; border-radius: 14px; background: var(--med-surface); border: 1px solid var(--med-line); }
+.dg-verdict ha-icon { --mdc-icon-size: 30px; flex: none; } .dg-verdict b { font-size: 1rem; } .dg-verdict span { display: block; font-size: .78rem; color: var(--med-muted); margin-top: 2px; }
+.dg-verdict.ok { border-color: color-mix(in srgb, var(--med-down) 55%, transparent); } .dg-verdict.ok ha-icon, .dg-verdict.ok b { color: var(--med-down); }
+.dg-verdict.warn { border-color: #f0a33a; } .dg-verdict.warn ha-icon, .dg-verdict.warn b { color: #f0a33a; }
+.dg-verdict.bad { border-color: var(--t-red); } .dg-verdict.bad ha-icon, .dg-verdict.bad b { color: var(--t-red); }
+.dg-verdict.off ha-icon { color: var(--med-muted); }
+.dg-sec { margin-top: 14px; } .dg-h { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: .9rem; margin-bottom: 8px; }
+.dg-h ha-icon { --mdc-icon-size: 18px; color: var(--med-accent, var(--med-blue)); } .dg-h small { margin-left: auto; font-weight: 500; font-size: .72rem; color: var(--med-muted); }
+.dg-g2, .dg-g3 { display: grid; gap: 8px; } .dg-g2 { grid-template-columns: repeat(2, minmax(0, 1fr)); } .dg-g3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.dg-g2 + .dg-g2 { margin-top: 8px; }
+@container (max-width: 380px) { .dg-g3 { grid-template-columns: repeat(2, minmax(0, 1fr)); } .dg-g2 { grid-template-columns: minmax(0, 1fr); } }
+.dg-t { background: var(--med-surface); border: 1px solid var(--med-line); border-radius: 12px; padding: 10px; min-width: 0; cursor: pointer; }
+.dg-t.ok { border-color: color-mix(in srgb, var(--med-down) 40%, transparent); } .dg-t.warn { border-color: #f0a33a; } .dg-t.bad { border-color: var(--t-red); }
+.dg-t.info { border-color: color-mix(in srgb, var(--med-blue) 60%, transparent); }
+.dg-tl { display: flex; justify-content: space-between; gap: 6px; font-size: .76rem; color: var(--med-muted); } .dg-tl b { font-size: .7rem; white-space: nowrap; }
+.dg-ok { color: var(--med-down); } .dg-warn { color: #f0a33a; } .dg-bad { color: var(--t-red); } .dg-info { color: var(--med-blue); }
+.dg-v { font-size: 1.25rem; font-weight: 700; margin-top: 4px; } .dg-v small { font-size: .7rem; color: var(--med-muted); font-weight: 500; margin-left: 3px; }
+.dg-n { font-size: .68rem; color: var(--med-muted); margin-top: 4px; line-height: 1.3; }
+.dg-kv { display: flex; justify-content: space-between; font-size: .76rem; color: var(--med-muted); margin-top: 4px; } .dg-kv b { color: var(--med-text); }
+.dg-cyl { display: grid; grid-template-columns: repeat(auto-fit, minmax(42px, 1fr)); gap: 6px; margin-top: 6px; }
+.dg-c { text-align: center; background: var(--med-bg); border-radius: 8px; padding: 6px 2px; font-size: .66rem; color: var(--med-muted); }
+.dg-c b { display: block; font-size: .95rem; color: var(--med-text); } .dg-c.warn b { color: #f0a33a; }
+.dg-bar { height: 6px; border-radius: 3px; background: var(--med-line); margin-top: 6px; overflow: hidden; } .dg-bar i { display: block; height: 100%; background: var(--med-blue); }
+.empty { display: grid; gap: 6px; padding: 24px; text-align: center; color: var(--med-muted); } .empty small { font-size: .78rem; }
+</style>`.replace(/(-?\d*\.?\d+)rem/g, "calc($1rem * var(--fs, 1))");
+
+const DIAG_SCHEMA = [
+  { name: "title", selector: { text: {} } },
+  { name: "vehicle", selector: { device: { integration: "torque_obd" } } },
+  { name: "show_live", selector: { boolean: {} } },
+  { name: "show_trip", selector: { boolean: {} } },
+  THEME_SELECT,
+  { name: "font_size", selector: { number: { min: 70, max: 150, step: 5, mode: "slider", unit_of_measurement: "%" } } },
+];
+const DIAG_LABELS = {
+  title: "Titre (Diagnostic moteur par défaut)",
+  vehicle: "Véhicule (vide = tous, en onglets)",
+  show_live: "Moteur en direct (charge, papillon, avance, débit d'air…)",
+  show_trip: "Trajet en cours",
+  theme: "Couleurs de la carte",
+  font_size: "Taille du texte",
+};
+class BudgetCarburantDiagnosticCardEditor extends makeEditor(DIAG_SCHEMA, DIAG_LABELS, DIAG_DEFAULTS) {}
+
 /* ---------------------------------------------------------- enregistrement */
 
 if (typeof customElements !== "undefined") {
   const define = (name, cls) => { if (!customElements.get(name)) customElements.define(name, cls); };
   define("budget-carburant-card", BudgetCarburantCard);
   define("budget-carburant-card-editor", BudgetCarburantCardEditor);
+  define("budget-carburant-diagnostic-card", BudgetCarburantDiagnosticCard);
+  define("budget-carburant-diagnostic-card-editor", BudgetCarburantDiagnosticCardEditor);
   window.customCards = window.customCards || [];
   if (!window.customCards.some((c) => c.type === "budget-carburant-card")) {
     window.customCards.push({
@@ -1485,7 +1822,15 @@ if (typeof customElements !== "undefined") {
       preview: true,
     });
   }
+  if (!window.customCards.some((c) => c.type === "budget-carburant-diagnostic-card")) {
+    window.customCards.push({
+      type: "budget-carburant-diagnostic-card",
+      name: "Diagnostic moteur (Torque)",
+      description: "Santé du moteur de chaque véhicule Torque OBD-II : températures, corrections carburant, sondes lambda, ratés et cliquetis, batterie, voyant moteur.",
+      preview: true,
+    });
+  }
   console.info(`%c BUDGET-CARBURANT %c ${CARD_VERSION} `, "background:#FF9100;color:#1a2434;font-weight:700", "background:#1d93e3;color:#fff");
 }
 
-if (typeof module !== "undefined") module.exports = { PLEINS, INSTALL };
+if (typeof module !== "undefined") module.exports = { PLEINS, INSTALL, DIAG };
