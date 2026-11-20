@@ -244,8 +244,9 @@ type: custom:budget-carburant-diagnostic-card
   minutes les bascules riche / pauvre de la sonde amont et de la sonde aval. Un catalyseur efficace lisse l'aval : il
   bascule bien moins que l'amont (OK). Si l'aval suit l'amont, la carte invite à faire vérifier le catalyseur ou la
   sonde aval. Les coupures d'injection en décélération (les deux sondes sous 0,2 V) sont ignorées.
-- **Torque déconnecté** : les valeurs sont figées depuis l'arrêt ; la carte affiche « moteur arrêté » et ne juge ni les
-  sondes ni le ralenti.
+- **Torque déconnecté** : les valeurs sont figées depuis l'arrêt ; la carte affiche « moteur arrêté » et ne les juge pas.
+  Seul le voyant moteur (distance mémorisée par le calculateur) reste suivi. Contact mis, moteur arrêté, la batterie est
+  jugée au repos.
 - **Électricité et huile** : tension de la batterie (13,2 à 14,8 V moteur tournant, 12,4 V ou plus au repos), qualité
   et niveau d'huile, régime de ralenti par rapport à sa consigne, distance depuis l'effacement des codes.
 - **Moteur en direct** (`show_live`) : charge, papillon, avance, débit d'air, pression du collecteur, temps d'injection.
