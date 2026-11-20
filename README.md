@@ -238,8 +238,14 @@ type: custom:budget-carburant-diagnostic-card
 - **Voyants** : voyant moteur, batterie, moteur en chauffe, Torque connecté ou non.
 - **Températures** : liquide de refroidissement et huile (en bleu sous 80 °C, moteur en chauffe : ce n'est pas une alerte),
   air d'admission et catalyseur.
-- **Mélange et combustion** : corrections carburant à court et long terme (OK entre −10 et +10 %), sondes lambda amont
-  et aval, ratés d'allumage et retrait d'avance anti-cliquetis **cylindre par cylindre** quand le véhicule les fournit.
+- **Mélange et combustion** : corrections carburant à court et long terme (OK entre −10 et +10 %), ratés d'allumage et
+  retrait d'avance anti-cliquetis **cylindre par cylindre** quand le véhicule les fournit.
+- **Sondes lambda** : jamais jugées sur une valeur isolée. En roulant, moteur chaud, la carte compte sur les 15 dernières
+  minutes les bascules riche / pauvre de la sonde amont et de la sonde aval. Un catalyseur efficace lisse l'aval : il
+  bascule bien moins que l'amont (OK). Si l'aval suit l'amont, la carte invite à faire vérifier le catalyseur ou la
+  sonde aval. Les coupures d'injection en décélération (les deux sondes sous 0,2 V) sont ignorées.
+- **Torque déconnecté** : les valeurs sont figées depuis l'arrêt ; la carte affiche « moteur arrêté » et ne juge ni les
+  sondes ni le ralenti.
 - **Électricité et huile** : tension de la batterie (13,2 à 14,8 V moteur tournant, 12,4 V ou plus au repos), qualité
   et niveau d'huile, régime de ralenti par rapport à sa consigne, distance depuis l'effacement des codes.
 - **Moteur en direct** (`show_live`) : charge, papillon, avance, débit d'air, pression du collecteur, temps d'injection.
