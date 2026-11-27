@@ -212,8 +212,8 @@ automation:
     description: >-
       Bip du tag NFC d'une voiture au plein : ouvre la page Plein, attend le bouton Enregistrer,
       vérifie et enregistre le plein (dernier plein, cumuls pour la consommation, calendrier).
-    mode: single
-    max_exceeded: silent
+    # un nouveau bip (ou widget) remplace le plein en attente, même d'une autre voiture
+    mode: restart
     triggers:
       # À ADAPTER : un déclencheur par voiture ; l'id est le nom court utilisé dans les entrées
       # (plein_<id>_dernier, plein_<id>_depense_totale…)
@@ -246,7 +246,8 @@ automation:
           # Optionnel : capteur du compteur kilométrique (OBD, intégration constructeur) par voiture,
           # pour pré-remplir le kilométrage
           odometer: "{{ {'citadine': '', 'suv': ''}.get(car, '') }}"
-          ctx: "{{ 'PLEIN_' ~ (car | upper) ~ '_' ~ (now().timestamp() | int) }}"
+          # même étiquette à chaque plein : la notification d'un plein remplacé disparaît
+          ctx: PLEIN_CARBURANT
           fuel_icons:
             SP98: "🔴"
             SP95: "🔵"
