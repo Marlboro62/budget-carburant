@@ -17,7 +17,7 @@
  * Style repris de la carte Enedis Linky New (content-card-linky-new), du même auteur.
  */
 
-const CARD_VERSION = "1.3.0-beta.2";
+const CARD_VERSION = "1.3.0";
 
 /* ------------------------------------------------------------- affichage */
 
