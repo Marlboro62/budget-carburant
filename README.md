@@ -99,7 +99,8 @@ Sans fichier à copier ni redémarrage, avec un compte administrateur :
    chaque étape.
 4. Écrivez un tag NFC par voiture avec l'application Home Assistant (**Paramètres › Tags › Ajouter
    un tag**), avec l'identifiant indiqué pour la voiture, ou imprimez un QR code à la place
-   (voir [Sans NFC : un QR code](#sans-nfc--un-qr-code)).
+   (voir [Sans NFC : un QR code](#sans-nfc--un-qr-code)), ou mettez un widget sur l'écran d'accueil
+   (voir [Sans tag : un widget Android](#sans-tag--un-widget-android)).
 
 Pour ajouter une voiture plus tard, ajoutez-la dans l'éditeur et relancez l'installation : les
 entrées et les pleins déjà notés sont gardés ; les scripts, l'automatisation et la page sont
@@ -165,6 +166,25 @@ les mêmes.
 
 Le téléphone qui flashe doit avoir l'application Home Assistant connectée à votre installation : un
 autre téléphone ouvre seulement une page du site home-assistant.io, sans noter de plein.
+
+## Sans tag : un widget Android
+
+Sans tag ni QR code, un widget sur l'écran d'accueil du téléphone lance aussi le plein : l'installation
+crée pour chaque voiture un script **Plein &lt;nom&gt;** (`script.plein_demarrer_<voiture>`, par
+exemple `script.plein_demarrer_citadine`), que l'automatisation traite comme le bip du tag.
+
+1. Sur le téléphone Android, faites un appui long sur l'écran d'accueil, puis **Widgets ›
+   Home Assistant › Bouton** (« Button » en anglais) et posez-le sur l'écran.
+2. Choisissez l'action `script.plein_demarrer_citadine` (le nom du script de la voiture), un libellé
+   (« Plein Citadine ») et une icône (`mdi:gas-station`), puis enregistrez.
+3. Au plein, touchez le widget : la page « Plein » s'ouvre comme avec le tag.
+
+La page s'ouvre sur le **téléphone par défaut** choisi à l'installation (un widget ne dit pas quel
+téléphone l'a touché, contrairement au tag). Le script peut aussi se lancer depuis un tableau de
+bord, un assistant vocal ou une autre automatisation.
+
+Installation en YAML : le package contient déjà les scripts `plein_demarrer_citadine` et
+`plein_demarrer_suv` et leurs déclencheurs ; adaptez-les à vos voitures (même `id` que la voiture).
 
 ## La carte
 

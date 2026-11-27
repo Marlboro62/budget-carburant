@@ -1,7 +1,8 @@
 # Budget carburant : pleins notés avec un tag NFC par voiture,
 # pour la carte custom:budget-carburant-card.
 #
-# Principe : au plein, on bipe le tag NFC de la voiture. Le téléphone ouvre la page « Plein »
+# Principe : au plein, on bipe le tag NFC de la voiture (ou on touche son widget, voir les scripts
+# plein_demarrer_<voiture>). Le téléphone ouvre la page « Plein »
 # (docs/page-plein.yaml) : on touche le carburant (le prix du jour se remplit), on tape les litres
 # et le kilométrage, puis « Enregistrer le plein ». L'automatisation vérifie la saisie, met à jour
 # les cumuls de la voiture et note le plein dans le calendrier (événement « Plein <voiture> »),
@@ -183,6 +184,28 @@ script:
     sequence:
       - event: plein_valide
 
+  # Raccourci sans tag : un script par voiture, à mettre dans un widget Bouton de l'application
+  # Android (écran d'accueil). Il ouvre la page « Plein » comme le bip du tag.
+  # À ADAPTER : un script par voiture ; voiture = l'id du déclencheur de la voiture
+  plein_demarrer_citadine:
+    alias: Plein Citadine
+    description: Raccourci du plein de Citadine sans tag (widget de l'écran d'accueil).
+    icon: mdi:gas-station
+    mode: single
+    sequence:
+      - event: plein_demarrer
+        event_data:
+          voiture: citadine
+  plein_demarrer_suv:
+    alias: Plein SUV
+    description: Raccourci du plein de SUV sans tag (widget de l'écran d'accueil).
+    icon: mdi:gas-station
+    mode: single
+    sequence:
+      - event: plein_demarrer
+        event_data:
+          voiture: suv
+
 automation:
   - id: budget_carburant_plein_tag_nfc
     alias: Plein de carburant (tag NFC)
@@ -202,6 +225,17 @@ automation:
         id: citadine
       - trigger: tag
         tag_id: Plein SUV
+        id: suv
+      # raccourci sans tag (scripts plein_demarrer_<voiture>) : un déclencheur par voiture
+      - trigger: event
+        event_type: plein_demarrer
+        event_data:
+          voiture: citadine
+        id: citadine
+      - trigger: event
+        event_type: plein_demarrer
+        event_data:
+          voiture: suv
         id: suv
     actions:
       - variables:

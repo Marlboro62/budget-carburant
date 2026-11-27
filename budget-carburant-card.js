@@ -17,7 +17,7 @@
  * Style repris de la carte Enedis Linky New (content-card-linky-new), du même auteur.
  */
 
-const CARD_VERSION = "1.2.0";
+const CARD_VERSION = "1.3.0-beta.1";
 
 /* ------------------------------------------------------------- affichage */
 
@@ -941,6 +941,9 @@ const FUELS = ["SP98", "SP95", "E10", "E85", "Gazole", "GPL"];
 const FUEL_ICONS = { SP98: "🔴", SP95: "🔵", E10: "🟢", E85: "🟠", Gazole: "🟡", GPL: "🟣" };
 const AUTOMATION_ALIAS = "Plein de carburant (tag NFC)";
 const PAGE_URL = "plein-carburant";
+/** Raccourci sans tag : script « Plein <voiture> » qui envoie cet événement, pour un widget de l'écran d'accueil. */
+const START_EVENT = "plein_demarrer";
+const START_SCRIPT = "plein_demarrer_";
 
 const INSTALL = {
   /** Identifiant d'une voiture, comme Home Assistant le tire du nom d'une entrée (« Clio 4 » → clio_4). */
@@ -1015,6 +1018,13 @@ const INSTALL = {
         mode: "single",
         sequence: [{ event: "plein_valide" }],
       },
+      ...Object.fromEntries(o.cars.map((c) => [`${START_SCRIPT}${c.id}`, {
+        alias: `Plein ${c.name}`,
+        description: `Raccourci du plein de ${c.name} sans tag (widget Bouton de l'application Home Assistant) : ouvre la page « Plein » comme le bip du tag. Créé par la carte Budget carburant.`,
+        icon: "mdi:gas-station",
+        mode: "single",
+        sequence: [{ event: START_EVENT, event_data: { voiture: c.id } }],
+      }])),
     };
   },
 
@@ -1036,7 +1046,10 @@ const INSTALL = {
       description: "Bip du tag NFC d'une voiture au plein : ouvre la page Plein, attend le bouton Enregistrer, vérifie et enregistre le plein (dernier plein, cumuls pour la consommation, calendrier). Créée par la carte Budget carburant.",
       mode: "single",
       max_exceeded: "silent",
-      triggers: o.cars.flatMap((c) => c.tags.map((t) => ({ trigger: "tag", tag_id: t, id: c.id }))),
+      triggers: o.cars.flatMap((c) => [
+        ...c.tags.map((t) => ({ trigger: "tag", tag_id: t, id: c.id })),
+        { trigger: "event", event_type: START_EVENT, event_data: { voiture: c.id }, id: c.id },
+      ]),
       conditions: [],
       actions: [
         {
@@ -1253,10 +1266,11 @@ const INSTALL = {
     if (ids.size !== o.cars.length) throw new Error("deux voitures ont le même nom");
 
     // une voiture suivie par l'automatisation en place mais absente de la liste cesserait d'être suivie
+    let lost = [];
     const current = Object.values(hass.states).find((s) => s.entity_id.startsWith("automation.") && s.attributes?.friendly_name === AUTOMATION_ALIAS);
     if (current?.attributes?.id) {
       const prev = await hass.callApi("GET", `config/automation/config/${current.attributes.id}`).catch(() => null);
-      const lost = (prev ? INSTALL.fromExisting(prev).cars : []).filter((c) => !ids.has(INSTALL.slug(c.name)));
+      lost = (prev ? INSTALL.fromExisting(prev).cars : []).filter((c) => !ids.has(INSTALL.slug(c.name)));
       if (lost.length && !(await confirm(lost.map((c) => c.name)))) throw new Error(`annulée : ${lost.map((c) => c.name).join(", ")} manque dans la liste des voitures`);
     }
 
@@ -1274,7 +1288,9 @@ const INSTALL = {
     log(made ? `${made} entrée${made > 1 ? "s" : ""} créée${made > 1 ? "s" : ""}` : "entrées déjà présentes");
 
     for (const [id, cfg] of Object.entries(INSTALL.scripts(o))) await hass.callApi("POST", `config/script/config/${id}`, cfg);
-    log("scripts plein_choisir_carburant et plein_valider enregistrés");
+    log(`scripts plein_choisir_carburant, plein_valider et ${o.cars.length} raccourci${o.cars.length > 1 ? "s" : ""} (${o.cars.map((c) => `script.${START_SCRIPT}${c.id}`).join(", ")}) enregistrés`);
+    // raccourcis des voitures retirées de la liste
+    for (const c of lost) await hass.callApi("DELETE", `config/script/config/${START_SCRIPT}${INSTALL.slug(c.name)}`).catch(() => null);
 
     const autoId = current?.attributes?.id || "budget_carburant_plein_tag_nfc";
     await hass.callApi("POST", `config/automation/config/${autoId}`, INSTALL.automation(o, calendar, autoId));
@@ -1379,7 +1395,9 @@ class BudgetCarburantCardEditor extends makeEditor(SCHEMA, LABELS, PLEINS_DEFAUL
         <p>Crée dans Home Assistant les entrées, les scripts, l'automatisation du tag NFC et la page « Plein »
         (adresse /${PAGE_URL}/choix). À relancer après avoir ajouté une voiture : les pleins déjà notés sont gardés.
         Les tags s'écrivent avec l'application (Paramètres › Tags). Sans NFC, un tag peut aussi s'imprimer
-        en QR code depuis Paramètres › Tags : donnez-lui un identifiant sans espace (plein-citadine) et ajoutez-le aux tags de la voiture.</p>
+        en QR code depuis Paramètres › Tags : donnez-lui un identifiant sans espace (plein-citadine) et ajoutez-le aux tags de la voiture.
+        Sans tag du tout : chaque voiture a aussi un script « Plein &lt;nom&gt; » (script.${START_SCRIPT}&lt;voiture&gt;) à mettre
+        dans un widget Bouton de l'application Android, sur l'écran d'accueil.</p>
         <div class="bc-cars"></div>
         <div class="bc-row"><button type="button" class="bc-add">Ajouter une voiture</button>
           <button type="button" class="bc-take" hidden>Reprendre l'installation en place</button></div>
