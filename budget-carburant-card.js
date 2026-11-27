@@ -17,7 +17,7 @@
  * Style repris de la carte Enedis Linky New (content-card-linky-new), du même auteur.
  */
 
-const CARD_VERSION = "1.3.0-beta.1";
+const CARD_VERSION = "1.3.0-beta.2";
 
 /* ------------------------------------------------------------- affichage */
 
@@ -1044,8 +1044,8 @@ const INSTALL = {
       id,
       alias: AUTOMATION_ALIAS,
       description: "Bip du tag NFC d'une voiture au plein : ouvre la page Plein, attend le bouton Enregistrer, vérifie et enregistre le plein (dernier plein, cumuls pour la consommation, calendrier). Créée par la carte Budget carburant.",
-      mode: "single",
-      max_exceeded: "silent",
+      // un nouveau bip (ou widget) remplace le plein en attente, même d'une autre voiture
+      mode: "restart",
       triggers: o.cars.flatMap((c) => [
         ...c.tags.map((t) => ({ trigger: "tag", tag_id: t, id: c.id })),
         { trigger: "event", event_type: START_EVENT, event_data: { voiture: c.id }, id: c.id },
@@ -1063,7 +1063,8 @@ const INSTALL = {
           variables: {
             car_name: `{{ ${JSON.stringify(names)}.get(car, car) }}`,
             odometer: `{{ ${JSON.stringify(odometers)}.get(car, '') }}`,
-            ctx: "{{ 'PLEIN_' ~ (car | upper) ~ '_' ~ (now().timestamp() | int) }}",
+            // même étiquette à chaque plein : la notification d'un plein remplacé disparaît
+            ctx: "PLEIN_CARBURANT",
             fuel_icons: FUEL_ICONS,
           },
         },

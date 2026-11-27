@@ -136,6 +136,10 @@ des cartes de Home Assistant.
 L'ouverture automatique de la page au bip utilise `command_webview` de l'application Android.
 Sur iPhone, touchez la notification pour ouvrir la page.
 
+Un plein attend « Enregistrer » 15 minutes. Un nouveau bip pendant ce temps, de la même voiture ou
+d'une autre, l'abandonne sans rien noter et en lance un nouveau : un bip par erreur pendant la saisie
+efface donc ce qui était tapé.
+
 ## Sans NFC : un QR code
 
 Un téléphone sans NFC, ou un QR code collé dans la trappe à carburant, fait le même travail : Home
